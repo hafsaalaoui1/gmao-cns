@@ -12,9 +12,9 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('planning_templates', function (Blueprint $table) {
-            $table->foreign('reading_canvas_id')
-                ->references('id')
-                ->on('equipment_reading_templates')
+            $table->foreignId('reading_canvas_id')
+                ->nullable()
+                ->constrained('equipment_reading_templates')
                 ->nullOnDelete();
         });
     }
@@ -26,6 +26,7 @@ return new class extends Migration
     {
         Schema::table('planning_templates', function (Blueprint $table) {
             $table->dropForeign(['reading_canvas_id']);
+            $table->dropColumn('reading_canvas_id');
         });
     }
 };
