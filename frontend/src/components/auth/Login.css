@@ -1,0 +1,887 @@
+:root {
+    --onda-primary: #005baa;
+    --onda-primary-hover: #004a8c;
+    --onda-primary-ring: rgba(0, 91, 170, 0.14);
+    --onda-accent: #38bdf8;
+
+    --ink-900: #0f172a;
+    --ink-800: #1e293b;
+    --ink-600: #475569;
+    --ink-400: #64748b;
+    --ink-300: #94a3b8;
+    --ink-200: #cbd5e1;
+    --ink-100: #f1f5f9;
+
+    --surface: #ffffff;
+    --surface-muted: #f8fafc;
+
+    --success: #10b981;
+
+    --radius-sm: 8px;
+    --radius-md: 10px;
+    --radius-xl: 16px;
+
+    --ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+
+/* ================================================================
+   RESET
+   ================================================================ */
+
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+
+html,
+body,
+#root {
+    width: 100%;
+    height: 100%;
+}
+
+
+body {
+    font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        Roboto,
+        Helvetica,
+        Arial,
+        sans-serif;
+
+    color: var(--ink-800);
+
+    background: #ffffff;
+
+    overflow: hidden;
+}
+
+
+button,
+input {
+    font: inherit;
+    color: inherit;
+}
+
+
+button {
+    background: none;
+    border: none;
+    cursor: pointer;
+}
+
+
+ul {
+    list-style: none;
+}
+
+
+/* ================================================================
+   ÉCRAN LOGIN
+   ================================================================ */
+
+.login-screen {
+    display: flex;
+
+    width: 100vw;
+    height: 100vh;
+
+    overflow: hidden;
+
+    background: #ffffff;
+}
+
+
+/* ================================================================
+   PANNEAU GAUCHE
+   ================================================================ */
+
+.left-panel {
+    position: relative;
+
+    height: 100%;
+
+    display: flex;
+    align-items: flex-end;
+
+    padding: 48px;
+
+    background-image: url('/Saiss.jpeg');
+
+    background-size: cover;
+
+    background-position: center;
+}
+
+
+/* Overlay */
+
+.panel-overlay {
+    position: absolute;
+
+    inset: 0;
+
+    z-index: 1;
+
+    background:
+        linear-gradient(
+            180deg,
+            rgba(3, 15, 34, 0.18) 0%,
+            rgba(3, 15, 34, 0.82) 100%
+        );
+}
+
+
+/* Grille */
+
+.panel-grid {
+    position: absolute;
+
+    inset: 0;
+
+    z-index: 1;
+
+    background-image:
+        linear-gradient(
+            rgba(255, 255, 255, 0.035) 1px,
+            transparent 1px
+        ),
+        linear-gradient(
+            90deg,
+            rgba(255, 255, 255, 0.035) 1px,
+            transparent 1px
+        );
+
+    background-size: 48px 48px;
+
+    pointer-events: none;
+}
+
+
+/* Contenu */
+
+.panel-content {
+    position: relative;
+
+    z-index: 2;
+
+    max-width: 520px;
+
+    color: #ffffff;
+}
+
+
+/* Badge */
+
+.badge-tag {
+    display: inline-flex;
+
+    align-items: center;
+
+    gap: 8px;
+
+    padding: 7px 13px;
+
+    margin-bottom: 20px;
+
+    border-radius: 999px;
+
+    background: rgba(255, 255, 255, 0.12);
+
+    border: 1px solid rgba(255, 255, 255, 0.22);
+
+    backdrop-filter: blur(8px);
+
+    font-size: 0.72rem;
+
+    font-weight: 600;
+
+    text-transform: uppercase;
+
+    letter-spacing: 0.04em;
+}
+
+
+/* Titre */
+
+.system-title {
+    font-size: 3rem;
+
+    font-weight: 800;
+
+    line-height: 1.1;
+
+    margin-bottom: 14px;
+
+    letter-spacing: -0.04em;
+}
+
+
+.title-accent {
+    color: var(--onda-accent);
+}
+
+
+/* Description */
+
+.system-desc {
+    max-width: 500px;
+
+    font-size: 0.95rem;
+
+    line-height: 1.65;
+
+    color: rgba(255, 255, 255, 0.9);
+
+    margin-bottom: 26px;
+}
+
+
+/* Fonctionnalités */
+
+.feature-list {
+    display: flex;
+
+    flex-direction: column;
+
+    gap: 11px;
+
+    margin-bottom: 28px;
+}
+
+
+.feature-list li {
+    display: flex;
+
+    align-items: center;
+
+    gap: 12px;
+
+    font-size: 0.875rem;
+
+    color: rgba(255, 255, 255, 0.94);
+}
+
+
+.feature-icon {
+    display: grid;
+
+    place-items: center;
+
+    width: 31px;
+    height: 31px;
+
+    border-radius: 8px;
+
+    background: rgba(255, 255, 255, 0.13);
+
+    color: var(--onda-accent);
+
+    border: 1px solid rgba(255, 255, 255, 0.1);
+
+    flex-shrink: 0;
+}
+
+
+/* Status */
+
+.status-chip {
+    display: inline-flex;
+
+    align-items: center;
+
+    gap: 8px;
+
+    padding: 8px 13px;
+
+    border-radius: var(--radius-sm);
+
+    background: rgba(6, 20, 38, 0.62);
+
+    border: 1px solid rgba(255, 255, 255, 0.13);
+
+    backdrop-filter: blur(8px);
+
+    font-size: 0.78rem;
+}
+
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+
+    border-radius: 50%;
+
+    background: var(--success);
+
+    box-shadow:
+        0 0 0 3px rgba(16, 185, 129, 0.14);
+}
+
+
+/* ================================================================
+   BARRE SÉPARATRICE
+   ================================================================ */
+
+.resizer-bar {
+    position: relative;
+
+    width: 6px;
+    height: 100%;
+
+    flex-shrink: 0;
+
+    background: #e2e8f0;
+
+    cursor: col-resize;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    z-index: 10;
+
+    transition:
+        background-color 0.2s ease;
+}
+
+
+.resizer-bar:hover {
+    background: var(--onda-primary);
+}
+
+
+.resizer-handle {
+    display: grid;
+
+    place-items: center;
+
+    width: 20px;
+    height: 38px;
+
+    border-radius: 10px;
+
+    background: #ffffff;
+
+    border: 1px solid #dbe2ea;
+
+    color: #94a3b8;
+
+    box-shadow:
+        0 2px 8px rgba(15, 23, 42, 0.08);
+}
+
+
+.resizer-bar:hover .resizer-handle {
+    color: var(--onda-primary);
+
+    border-color: #bfdbfe;
+}
+
+
+/* ================================================================
+   PANNEAU DROIT
+   ================================================================ */
+
+.right-panel {
+    position: relative;
+
+    height: 100%;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    padding: 40px;
+
+    background: #ffffff;
+
+    overflow-y: auto;
+}
+
+
+/* ================================================================
+   CONTENEUR LOGIN
+   ================================================================ */
+
+.login-container {
+    width: 100%;
+
+    max-width: 390px;
+
+    display: flex;
+
+    flex-direction: column;
+}
+
+
+/* ================================================================
+   LOGO ONDA
+   ================================================================ */
+
+.login-brand {
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    margin-bottom: 30px;
+}
+
+
+.onda-brand-logo {
+    display: block;
+
+    width: auto;
+
+    height: 68px;
+
+    object-fit: contain;
+}
+
+
+/* ================================================================
+   TITRE
+   ================================================================ */
+
+.login-heading {
+    text-align: center;
+
+    margin-bottom: 30px;
+}
+
+
+.login-heading h2 {
+    margin: 0 0 8px;
+
+    font-size: 1.65rem;
+
+    font-weight: 700;
+
+    line-height: 1.2;
+
+    color: var(--ink-900);
+
+    letter-spacing: -0.025em;
+}
+
+
+.login-heading p {
+    margin: 0;
+
+    font-size: 0.84rem;
+
+    line-height: 1.5;
+
+    color: var(--ink-400);
+}
+
+
+/* ================================================================
+   FORMULAIRE
+   ================================================================ */
+
+.credentials-form {
+    display: flex;
+
+    flex-direction: column;
+
+    gap: 19px;
+}
+
+
+.form-group {
+    display: flex;
+
+    flex-direction: column;
+
+    gap: 8px;
+}
+
+
+.form-group label {
+    font-size: 0.82rem;
+
+    font-weight: 600;
+
+    color: var(--ink-800);
+}
+
+
+/* ================================================================
+   CHAMPS
+   ================================================================ */
+
+.input-field {
+    display: flex;
+
+    align-items: center;
+
+    width: 100%;
+
+    height: 48px;
+
+    padding: 0 13px;
+
+    background: #ffffff;
+
+    border: 1px solid #d1d5db;
+
+    border-radius: 9px;
+
+    transition:
+        border-color 0.2s ease,
+        box-shadow 0.2s ease;
+}
+
+
+.input-field:hover {
+    border-color: #94a3b8;
+}
+
+
+.input-field:focus-within {
+    border-color: var(--onda-primary);
+
+    box-shadow:
+        0 0 0 3px var(--onda-primary-ring);
+}
+
+
+.field-icon {
+    flex-shrink: 0;
+
+    margin-right: 10px;
+
+    color: #64748b;
+}
+
+
+.input-field input {
+    flex: 1;
+
+    min-width: 0;
+
+    width: 100%;
+
+    height: 100%;
+
+    padding: 0;
+
+    border: none !important;
+
+    outline: none !important;
+
+    background: transparent !important;
+
+    box-shadow: none !important;
+
+    color: var(--ink-900);
+
+    font-size: 0.9rem;
+}
+
+
+.input-field input::placeholder {
+    color: #94a3b8;
+}
+
+
+/* ================================================================
+   VISIBILITÉ MOT DE PASSE
+   ================================================================ */
+
+.visibility-toggle {
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    padding: 5px;
+
+    color: #64748b;
+
+    transition:
+        color 0.2s ease;
+}
+
+
+.visibility-toggle:hover {
+    color: var(--onda-primary);
+}
+
+
+/* ================================================================
+   REMEMBER ME
+   ================================================================ */
+
+.form-options {
+    display: flex;
+
+    align-items: center;
+
+    margin-top: -3px;
+}
+
+
+.checkbox-field {
+    display: inline-flex;
+
+    align-items: center;
+
+    gap: 8px;
+
+    cursor: pointer;
+
+    user-select: none;
+
+    font-size: 0.81rem;
+
+    color: var(--ink-600);
+}
+
+
+.checkbox-field input {
+    width: 16px;
+
+    height: 16px;
+
+    margin: 0;
+
+    cursor: pointer;
+
+    accent-color: var(--onda-primary);
+}
+
+
+/* ================================================================
+   BOUTON CONNEXION
+   ================================================================ */
+
+.submit-action-btn {
+    width: 100%;
+
+    height: 48px;
+
+    margin-top: 4px;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    gap: 9px;
+
+    border-radius: 9px;
+
+    background: var(--onda-primary);
+
+    color: #ffffff;
+
+    font-size: 0.92rem;
+
+    font-weight: 600;
+
+    cursor: pointer;
+
+    transition:
+        background-color 0.2s ease,
+        transform 0.15s ease,
+        box-shadow 0.2s ease;
+}
+
+
+.submit-action-btn:hover:not(:disabled) {
+    background: var(--onda-primary-hover);
+
+    box-shadow:
+        0 5px 14px rgba(0, 91, 170, 0.2);
+}
+
+
+.submit-action-btn:active:not(:disabled) {
+    transform: translateY(1px);
+}
+
+
+.submit-action-btn:disabled {
+    opacity: 0.65;
+
+    cursor: not-allowed;
+}
+
+
+/* ================================================================
+   ERREUR
+   ================================================================ */
+
+.form-alert {
+    display: flex;
+
+    align-items: center;
+
+    gap: 10px;
+
+    padding: 11px 13px;
+
+    margin-bottom: 19px;
+
+    border-radius: 8px;
+
+    background: #fef2f2;
+
+    border: 1px solid #fecaca;
+
+    color: #991b1b;
+
+    font-size: 0.81rem;
+
+    line-height: 1.4;
+}
+
+
+.form-alert svg {
+    flex-shrink: 0;
+}
+
+
+/* ================================================================
+   SÉCURITÉ
+   ================================================================ */
+
+.login-security {
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    gap: 7px;
+
+    margin-top: 27px;
+
+    color: #94a3b8;
+
+    font-size: 0.74rem;
+}
+
+
+.login-security svg {
+    color: var(--success);
+}
+
+
+/* ================================================================
+   VERSION
+   ================================================================ */
+
+.login-version {
+    margin-top: 9px;
+
+    text-align: center;
+
+    color: #cbd5e1;
+
+    font-size: 0.68rem;
+}
+
+
+/* ================================================================
+   SPINNER
+   ================================================================ */
+
+.spinner {
+    animation:
+        spin 0.8s linear infinite;
+}
+
+
+@keyframes spin {
+
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+
+/* ================================================================
+   RESPONSIVE
+   ================================================================ */
+
+@media (max-width: 900px) {
+
+    .left-panel,
+    .resizer-bar {
+        display: none;
+    }
+
+
+    .right-panel {
+        width: 100% !important;
+
+        padding: 30px 22px;
+
+        background: #ffffff;
+    }
+
+
+    .login-container {
+        max-width: 400px;
+    }
+
+
+    .onda-brand-logo {
+        height: 62px;
+    }
+}
+
+
+@media (max-width: 480px) {
+
+    .right-panel {
+        padding: 24px 18px;
+    }
+
+
+    .login-container {
+        max-width: 100%;
+    }
+
+
+    .login-brand {
+        margin-bottom: 25px;
+    }
+
+
+    .onda-brand-logo {
+        height: 58px;
+    }
+
+
+    .login-heading {
+        margin-bottom: 25px;
+    }
+
+
+    .login-heading h2 {
+        font-size: 1.45rem;
+    }
+}

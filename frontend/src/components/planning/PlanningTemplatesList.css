@@ -1,0 +1,191 @@
+.planning-templates {
+    padding: 24px;
+    max-width: 1200px;
+    margin: 0 auto;
+    background: #f8fafc;
+    min-height: 100vh;
+}
+
+.templates-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 24px;
+    background: white;
+    padding: 16px 24px;
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+
+.templates-header h1 {
+    font-size: 24px;
+    font-weight: 600;
+    margin: 0;
+}
+
+.header-actions {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.btn-primary, .btn-generate-all, .btn-refresh {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 14px;
+    transition: all 0.2s;
+}
+
+.btn-primary {
+    background: #3b82f6;
+    color: white;
+    text-decoration: none;
+}
+.btn-primary:hover { background: #2563eb; }
+
+.btn-generate-all {
+    background: #22c55e;
+    color: white;
+}
+.btn-generate-all:hover { background: #16a34a; }
+
+.btn-refresh {
+    background: #f1f5f9;
+    color: #1e293b;
+    border: 1px solid #cbd5e1;
+}
+.btn-refresh:hover { background: #e2e8f0; }
+
+.templates-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+    gap: 20px;
+}
+
+.template-card {
+    background: white;
+    border-radius: 12px;
+    padding: 16px 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    transition: transform 0.15s;
+}
+.template-card:hover { transform: translateY(-2px); }
+
+.card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.card-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.card-title h3 { margin: 0; font-size: 18px; }
+
+.status-badge {
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 500;
+}
+.status-badge.active { background: #dcfce7; color: #16a34a; }
+.status-badge.inactive { background: #f1f5f9; color: #94a3b8; }
+
+.card-actions {
+    display: flex;
+    gap: 4px;
+}
+.btn-edit, .btn-delete {
+    padding: 4px 8px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    background: transparent;
+    transition: all 0.15s;
+}
+.btn-edit { color: #94a3b8; }
+.btn-edit:hover { background: #e2e8f0; color: #3b82f6; }
+.btn-delete { color: #94a3b8; }
+.btn-delete:hover { background: #fee2e2; color: #dc2626; }
+
+.card-body .info-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 14px;
+}
+.card-body .info-row svg { color: #94a3b8; flex-shrink: 0; }
+
+.priority-faible { color: #94a3b8; }
+.priority-normale { color: #3b82f6; }
+.priority-elevée { color: #f59e0b; }
+.priority-urgente { color: #ef4444; }
+
+.description {
+    margin-top: 8px;
+    font-size: 13px;
+    color: #64748b;
+    border-top: 1px solid #f1f5f9;
+    padding-top: 8px;
+}
+
+.card-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #e2e8f0;
+}
+
+.btn-generate {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 14px;
+    background: #3b82f6;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+}
+.btn-generate:hover { background: #2563eb; }
+.btn-generate:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.dates {
+    font-size: 12px;
+    color: #94a3b8;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 60px;
+    color: #94a3b8;
+}
+.hint { font-size: 14px; margin-top: 8px; }
+
+.loading-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px;
+    color: #94a3b8;
+}
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}

@@ -1,0 +1,374 @@
+/* ==========================================================================
+   HEADER DESIGN SAAS MODERNE & PRO
+   ========================================================================== */
+.header {
+  height: 60px;
+  width: 100%;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+  box-sizing: border-box;
+  box-shadow: 0 1px 2px 0 rgba(15, 23, 42, 0.03);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+}
+
+.header-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.service-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 99px;
+  background: #f0f9ff;
+  color: #0284c7;
+  border: 1px solid #e0f2fe;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ==========================================================================
+   BOUTONS ACTION (THEME & NOTIFICATIONS)
+   ========================================================================== */
+.theme-toggle-btn,
+.notification-button {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  padding: 0;
+  position: relative;
+}
+
+.theme-toggle-btn:hover,
+.notification-button:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.theme-icon,
+.notification-icon {
+  width: 17px;
+  height: 17px;
+  color: #64748b;
+  transition: color 0.15s ease;
+}
+
+.theme-icon.sun { color: #f59e0b; }
+.theme-icon.moon { color: #64748b; }
+
+.notification-button:hover .notification-icon,
+.theme-toggle-btn:hover .theme-icon {
+  color: #0284c7;
+}
+
+/* BADGE NOTIFICATION */
+.notification-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 99px;
+  background: #ef4444;
+  color: #ffffff;
+  border: 2px solid #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.6rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+/* ==========================================================================
+   PROFIL UTILISATEUR
+   ========================================================================== */
+.user-profile-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 10px 4px 4px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 99px;
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+
+.user-profile-card:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.user-avatar-circle {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #0284c7;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.8rem;
+}
+
+.user-details {
+  display: flex;
+  flex-direction: column;
+  padding-right: 4px;
+}
+
+.user-name {
+  font-size: 0.775rem;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.2;
+}
+
+.user-status {
+  font-size: 0.65rem;
+  color: #10b981;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.status-dot {
+  width: 5px;
+  height: 5px;
+  background-color: #10b981;
+  border-radius: 50%;
+}
+
+/* ==========================================================================
+   DROPDOWN NOTIFICATIONS
+   ========================================================================== */
+.notification-wrapper {
+  position: relative;
+}
+
+.notification-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 360px;
+  max-width: calc(100vw - 24px);
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.1), 0 8px 10px -6px rgba(15, 23, 42, 0.05);
+  overflow: hidden;
+  z-index: 1100;
+}
+
+.notification-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.notification-header h3 {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.notification-header span {
+  display: block;
+  font-size: 0.7rem;
+  color: #64748b;
+}
+
+.mark-all-button {
+  border: none;
+  background: transparent;
+  color: #0284c7;
+  font-size: 0.725rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.mark-all-button:hover {
+  background: #f0f9ff;
+}
+
+.notification-list {
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+.notification-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #f1f5f9;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.15s ease;
+}
+
+.notification-item:hover {
+  background: #f8fafc;
+}
+
+.notification-item.unread {
+  background: #f0f9ff;
+}
+
+.notification-item.unread:hover {
+  background: #e0f2fe;
+}
+
+.notification-item-icon {
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  border-radius: 8px;
+  background: #e0f2fe;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.notification-item-content {
+  flex: 1;
+  min-width: 0;
+  padding-right: 16px;
+}
+
+.notification-item-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.notification-item-top strong {
+  font-size: 0.775rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.notification-item-content p {
+  margin: 2px 0 4px;
+  font-size: 0.735rem;
+  color: #475569;
+}
+
+.notification-time {
+  font-size: 0.65rem;
+  color: #94a3b8;
+}
+
+.unread-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #0284c7;
+}
+
+.notification-delete {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 16px;
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.15s ease;
+}
+
+.notification-item:hover .notification-delete {
+  opacity: 1;
+}
+
+.notification-delete:hover {
+  background: #fee2e2;
+  color: #ef4444;
+}
+
+.notification-empty {
+  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  text-align: center;
+}
+
+.empty-notification-icon {
+  font-size: 26px;
+  margin-bottom: 6px;
+  opacity: 0.6;
+}
+
+.notification-empty p {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #475569;
+}
+
+.notification-empty span {
+  font-size: 0.7rem;
+  color: #94a3b8;
+}
+
+.notification-loader {
+  width: 20px;
+  height: 20px;
+  border: 2px solid #e2e8f0;
+  border-top-color: #0284c7;
+  border-radius: 50%;
+  animation: notificationSpin 0.8s linear infinite;
+  margin-bottom: 8px;
+}
+
+@keyframes notificationSpin {
+  to { transform: rotate(360deg); }
+}

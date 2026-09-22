@@ -1,0 +1,50 @@
+/* ============================================
+   LAYOUT PRINCIPAL - CNS GMAO (Classes alignées)
+   ============================================ */
+
+:root {
+  --sidebar-width: 260px;
+  --sidebar-collapsed-width: 72px;
+  --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Conteneur principal (Côte à côte) */
+.app {
+  display: flex;
+  flex-direction: row;
+  width: 100vw;
+  min-height: 100vh;
+  background-color: var(--bg-main, #f8fafc);
+  overflow-x: hidden;
+}
+
+/* Zone à droite de la Sidebar */
+.main-content {
+  flex: 1; /* Remplit l'espace restant sans chevaucher la Sidebar */
+  display: flex;
+  flex-direction: column;
+  min-width: 0; /* Empêche le débordement horizontal */
+  height: 100vh;
+  overflow-y: auto;
+  position: relative;
+}
+
+/* Force le Header à rester sagement dans le flux du main-content */
+.main-content > .header {
+  width: 100%;
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  flex-shrink: 0;
+}
+
+/* Zone du contenu des pages sous le Header */
+.content {
+  flex: 1;
+  padding: 24px;
+  width: 100%;
+}

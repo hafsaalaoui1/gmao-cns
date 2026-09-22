@@ -1,0 +1,858 @@
+/* ============================================================
+   BASE
+   ============================================================ */
+
+.ticket-details-page {
+  max-width: 1250px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 3rem;
+  background: #f8fafc;
+  min-height: 100vh;
+
+  font-family:
+    'Inter',
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+
+  color: #0f172a;
+  box-sizing: border-box;
+}
+
+.ticket-details-page *,
+.ticket-details-page *::before,
+.ticket-details-page *::after {
+  box-sizing: border-box;
+}
+
+
+/* ============================================================
+   ÉTATS DE CHARGEMENT / VIDE
+   ============================================================ */
+
+.details-state-container {
+  min-height: 500px;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+
+  gap: 1rem;
+
+  color: #64748b;
+}
+
+.details-state-container p {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.empty-icon {
+  color: #94a3b8;
+}
+
+
+/* ============================================================
+   BARRE DE RETOUR
+   ============================================================ */
+
+.details-top-bar {
+  margin-bottom: 1rem;
+}
+
+.btn-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+
+  padding: 0.5rem 0.25rem;
+
+  background: transparent;
+  border: none;
+
+  color: #475569;
+
+  font-size: 0.9rem;
+  font-weight: 500;
+
+  cursor: pointer;
+
+  transition:
+    color 0.2s ease,
+    transform 0.2s ease;
+}
+
+.btn-back:hover {
+  color: #2563eb;
+}
+
+.btn-back svg {
+  transition: transform 0.2s ease;
+}
+
+.btn-back:hover svg {
+  transform: translateX(-4px);
+}
+
+
+/* ============================================================
+   EN-TÊTE
+   ============================================================ */
+
+.details-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  flex-wrap: wrap;
+  gap: 1.25rem;
+
+  margin-bottom: 1.5rem;
+  padding: 1.5rem 1.75rem;
+
+  background: #ffffff;
+
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.03),
+    0 4px 12px rgba(15, 23, 42, 0.04);
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+
+  min-width: 0;
+}
+
+.ticket-icon-wrapper {
+  width: 50px;
+  height: 50px;
+
+  flex-shrink: 0;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 12px;
+
+  background: #eff6ff;
+  border: 1px solid #dbeafe;
+
+  color: #2563eb;
+}
+
+.ticket-icon {
+  color: #2563eb;
+}
+
+.header-text {
+  min-width: 0;
+}
+
+.header-text h1 {
+  margin: 0 0 0.3rem;
+
+  font-size: 1.55rem;
+  line-height: 1.25;
+
+  font-weight: 650;
+  letter-spacing: -0.02em;
+
+  color: #0f172a;
+}
+
+.header-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+
+  margin: 0;
+
+  color: #64748b;
+
+  font-size: 0.85rem;
+}
+
+.btn-edit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+
+  min-height: 38px;
+
+  padding: 0.55rem 1rem;
+
+  background: #2563eb;
+  color: #ffffff;
+
+  border: 1px solid #2563eb;
+  border-radius: 8px;
+
+  font-size: 0.85rem;
+  font-weight: 550;
+
+  text-decoration: none;
+
+  cursor: pointer;
+
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.1s ease;
+}
+
+.btn-edit:hover {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+
+  box-shadow:
+    0 3px 8px rgba(37, 99, 235, 0.18);
+}
+
+.btn-edit:active {
+  transform: scale(0.98);
+}
+
+
+/* ============================================================
+   GRILLE PRINCIPALE
+   ============================================================ */
+
+.details-grid {
+  display: grid;
+
+  grid-template-columns:
+    minmax(0, 2fr)
+    minmax(300px, 1fr);
+
+  gap: 1.5rem;
+
+  align-items: start;
+}
+
+.main-column,
+.sidebar-column {
+  min-width: 0;
+}
+
+
+/* ============================================================
+   CARTES
+   ============================================================ */
+
+.detail-card {
+  margin-bottom: 1.25rem;
+
+  background: #ffffff;
+
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+
+  overflow: hidden;
+
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.03),
+    0 3px 10px rgba(15, 23, 42, 0.025);
+
+  transition:
+    box-shadow 0.2s ease,
+    border-color 0.2s ease;
+}
+
+.detail-card:hover {
+  border-color: #dbe3ee;
+
+  box-shadow:
+    0 2px 5px rgba(15, 23, 42, 0.04),
+    0 6px 18px rgba(15, 23, 42, 0.035);
+}
+
+.detail-card:last-child {
+  margin-bottom: 0;
+}
+
+
+/* ============================================================
+   EN-TÊTE DES CARTES
+   ============================================================ */
+
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+
+  min-height: 52px;
+
+  padding: 0.85rem 1.25rem;
+
+  background: #fafcff;
+
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.card-header h2 {
+  margin: 0;
+
+  font-size: 0.9rem;
+  font-weight: 600;
+
+  color: #1e293b;
+}
+
+.card-icon {
+  flex-shrink: 0;
+  color: #64748b;
+}
+
+.solution-icon {
+  color: #16a34a;
+}
+
+
+/* ============================================================
+   CORPS DES CARTES
+   ============================================================ */
+
+.card-body {
+  padding: 1.25rem 1.35rem;
+}
+
+
+/* ============================================================
+   TEXTES
+   ============================================================ */
+
+.description-text,
+.diagnostic-text,
+.solution-text {
+  margin: 0;
+
+  font-size: 0.9rem;
+  line-height: 1.7;
+
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.description-text {
+  color: #334155;
+}
+
+.diagnostic-text {
+  color: #475569;
+}
+
+.solution-text {
+  color: #166534;
+}
+
+
+/* ============================================================
+   BADGES
+   ============================================================ */
+
+.badge-status,
+.badge-priority {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  gap: 0.35rem;
+
+  min-height: 27px;
+
+  padding: 0.25rem 0.65rem;
+
+  border-radius: 999px;
+
+  font-size: 0.75rem;
+  font-weight: 600;
+
+  white-space: nowrap;
+
+  letter-spacing: 0;
+}
+
+
+/* ============================================================
+   STATUTS
+   ============================================================ */
+
+.status-nouveau {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.status-assigne {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.status-en-cours {
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.status-en-attente {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.status-resolu {
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+.status-cloture {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+
+/* ============================================================
+   PRIORITÉS
+   ============================================================ */
+
+.priority-urgente {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.priority-elevee {
+  background: #fff7ed;
+  color: #ea580c;
+}
+
+.priority-normale {
+  background: #f0f9ff;
+  color: #0284c7;
+}
+
+.priority-faible {
+  background: #f0fdf4;
+  color: #16a34a;
+}
+
+
+/* ============================================================
+   LISTE DES MÉTADONNÉES
+   ============================================================ */
+
+.meta-list {
+  display: flex;
+  flex-direction: column;
+
+  gap: 0;
+}
+
+.meta-item {
+  display: flex;
+
+  align-items: center;
+  justify-content: space-between;
+
+  gap: 1rem;
+
+  min-height: 45px;
+
+  padding: 0.55rem 0;
+}
+
+.meta-label {
+  display: flex;
+  align-items: center;
+
+  gap: 0.45rem;
+
+  flex-shrink: 0;
+
+  color: #64748b;
+
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.meta-label svg {
+  color: #94a3b8;
+}
+
+.meta-value {
+  max-width: 60%;
+
+  color: #1e293b;
+
+  font-size: 0.82rem;
+  font-weight: 550;
+
+  text-align: right;
+
+  word-break: break-word;
+}
+
+.meta-value.highlight {
+  color: #2563eb;
+  font-weight: 600;
+}
+
+.meta-divider {
+  width: 100%;
+
+  margin: 0;
+
+  border: none;
+  border-top: 1px solid #f1f5f9;
+}
+
+
+/* ============================================================
+   SÉLECTEUR DE STATUT
+   ============================================================ */
+
+.meta-value select {
+  min-width: 125px;
+  max-width: 170px;
+
+  min-height: 30px;
+
+  padding: 0.25rem 1.7rem 0.25rem 0.65rem;
+
+  border-radius: 7px;
+
+  border: 1px solid #cbd5e1;
+
+  background: #ffffff;
+
+  color: #334155;
+
+  font-size: 0.75rem;
+  font-weight: 600;
+
+  cursor: pointer;
+
+  outline: none;
+
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    background 0.2s ease;
+}
+
+.meta-value select:hover {
+  border-color: #94a3b8;
+}
+
+.meta-value select:focus {
+  border-color: #2563eb;
+
+  box-shadow:
+    0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.meta-value select:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+
+/* ============================================================
+   PETITES INFORMATIONS SOUS LES VALEURS
+   ============================================================ */
+
+.meta-value small {
+  font-size: 0.7rem;
+}
+
+
+/* ============================================================
+   SIDEBAR
+   ============================================================ */
+
+.sidebar-column {
+  position: sticky;
+  top: 1.5rem;
+}
+
+
+/* ============================================================
+   RESPONSIVE TABLETTE
+   ============================================================ */
+
+@media (max-width: 992px) {
+
+  .details-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar-column {
+    position: static;
+    order: -1;
+  }
+
+  .sidebar-column .detail-card {
+    margin-bottom: 1.25rem;
+  }
+}
+
+
+/* ============================================================
+   RESPONSIVE MOBILE
+   ============================================================ */
+
+@media (max-width: 640px) {
+
+  .ticket-details-page {
+    padding: 1rem 0.75rem 2rem;
+  }
+
+  .details-top-bar {
+    margin-bottom: 0.75rem;
+  }
+
+  .details-header {
+    flex-direction: column;
+    align-items: stretch;
+
+    padding: 1rem;
+
+    border-radius: 11px;
+  }
+
+  .header-left {
+    align-items: flex-start;
+  }
+
+  .ticket-icon-wrapper {
+    width: 44px;
+    height: 44px;
+  }
+
+  .header-text h1 {
+    font-size: 1.3rem;
+  }
+
+  .header-meta {
+    font-size: 0.78rem;
+  }
+
+  .btn-edit {
+    width: 100%;
+  }
+
+  .details-grid {
+    gap: 1rem;
+  }
+
+  .detail-card {
+    border-radius: 10px;
+  }
+
+  .card-header {
+    min-height: 48px;
+
+    padding: 0.75rem 1rem;
+  }
+
+  .card-header h2 {
+    font-size: 0.85rem;
+  }
+
+  .card-body {
+    padding: 1rem;
+  }
+
+  .description-text,
+  .diagnostic-text,
+  .solution-text {
+    font-size: 0.85rem;
+  }
+
+  .meta-item {
+    align-items: flex-start;
+    flex-direction: column;
+
+    gap: 0.35rem;
+
+    padding: 0.7rem 0;
+  }
+
+  .meta-label {
+    font-size: 0.76rem;
+  }
+
+  .meta-value {
+    max-width: 100%;
+
+    width: 100%;
+
+    text-align: left;
+  }
+
+  .meta-value select {
+    width: 100%;
+    max-width: none;
+  }
+}
+
+
+/* ============================================================
+   TRÈS PETITS ÉCRANS
+   ============================================================ */
+
+@media (max-width: 400px) {
+
+  .ticket-details-page {
+    padding-left: 0.6rem;
+    padding-right: 0.6rem;
+  }
+
+  .details-header {
+    padding: 0.85rem;
+  }
+
+  .header-left {
+    gap: 0.7rem;
+  }
+
+  .ticket-icon-wrapper {
+    width: 40px;
+    height: 40px;
+  }
+
+  .header-text h1 {
+    font-size: 1.15rem;
+  }
+}
+/* ============================================================
+   ACTIONS TICKET
+   ============================================================ */
+
+.ticket-action-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+
+    min-height: 38px;
+    padding: 0.55rem 0.9rem;
+
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+
+    background: #ffffff;
+    color: #334155;
+
+    font-size: 0.82rem;
+    font-weight: 600;
+
+    cursor: pointer;
+
+    transition:
+        background 0.2s ease,
+        border-color 0.2s ease,
+        color 0.2s ease,
+        box-shadow 0.2s ease,
+        transform 0.1s ease;
+}
+
+.ticket-action-btn:hover {
+    border-color: #94a3b8;
+    background: #f8fafc;
+}
+
+.ticket-action-btn:active {
+    transform: scale(0.98);
+}
+
+.ticket-action-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.ticket-action-success {
+    background: #f0fdf4;
+    border-color: #bbf7d0;
+    color: #15803d;
+}
+
+.ticket-action-success:hover {
+    background: #dcfce7;
+    border-color: #86efac;
+}
+
+
+/* ============================================================
+   FORMULAIRES TECHNIQUES
+   ============================================================ */
+
+.ticket-details-page textarea {
+    display: block;
+    width: 100%;
+
+    background: #ffffff;
+    color: #1e293b;
+
+    transition:
+        border-color 0.2s ease,
+        box-shadow 0.2s ease;
+}
+
+.ticket-details-page textarea:focus {
+    border-color: #2563eb !important;
+
+    box-shadow:
+        0 0 0 3px rgba(37, 99, 235, 0.1);
+
+    outline: none;
+}
+
+
+/* ============================================================
+   RESPONSIVE ACTIONS
+   ============================================================ */
+
+@media (max-width: 640px) {
+
+    .ticket-action-btn {
+        width: 100%;
+    }
+
+}
+/* ============================================================
+   BOUTON CONFIRMER LA PANNE
+   ============================================================ */
+
+.ticket-action-danger {
+    background: #fef2f2;
+    border-color: #fecaca;
+    color: #dc2626;
+}
+
+.ticket-action-danger:hover {
+    background: #fee2e2;
+    border-color: #fca5a5;
+    color: #b91c1c;
+}
+
+.ticket-action-danger:active {
+    transform: scale(0.98);
+}

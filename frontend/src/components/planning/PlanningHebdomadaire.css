@@ -1,0 +1,462 @@
+/* ============================================
+   STRUCTURE GLOBALE & ARRIÈRE-PLAN IMPACTANT
+   ============================================ */
+.planning-hebdomadaire {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 28px;
+  min-height: 100vh;
+  color: #0f172a;
+  font-family: inherit;
+
+  /* Fond dynamique attractif identique au Dashboard (Mesh gradient) */
+  background-color: #f1f5f9;
+  background-image: 
+    radial-gradient(at 0% 0%, rgba(37, 99, 235, 0.12) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, rgba(139, 92, 246, 0.12) 0px, transparent 50%),
+    radial-gradient(at 50% 100%, rgba(16, 185, 129, 0.08) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, rgba(245, 158, 11, 0.08) 0px, transparent 50%);
+  background-attachment: fixed;
+}
+
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 350px;
+  gap: 12px;
+  color: #64748b;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ============================================
+   EN-TÊTE & BARRE DE NAVIGATION (GLASSMORPHISM)
+   ============================================ */
+.ph-header,
+.ph-nav,
+.ph-legend {
+  background: rgba(255, 255, 255, 0.85) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.6) !important;
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.05), 
+              0 8px 10px -6px rgba(15, 23, 42, 0.03) !important;
+  border-radius: 12px;
+}
+
+.ph-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+}
+
+.ph-title {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  color: #2563eb;
+}
+
+.ph-title h1 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.ph-title p {
+  margin: 2px 0 0 0;
+  font-size: 0.85rem;
+  color: #64748b;
+}
+
+.btn-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-refresh:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #2563eb;
+  color: #2563eb;
+}
+
+/* Navigation de Semaine */
+.ph-nav {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+}
+
+.nav-btn, .today-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.nav-btn:hover, .today-btn:hover {
+  background: #eff6ff;
+  border-color: #3b82f6;
+  color: #2563eb;
+}
+
+.ph-week-display {
+  margin-left: auto;
+  font-size: 0.95rem;
+  color: #0f172a;
+}
+
+/* ============================================
+   TABLEAU DE PLANNING REHAUSSÉ
+   ============================================ */
+.ph-table-wrapper {
+  overflow-x: auto;
+  background: rgba(255, 255, 255, 0.9) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.05);
+}
+
+.ph-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  table-layout: fixed;
+}
+
+.ph-table th, .ph-table td {
+  padding: 10px;
+  border: 1px solid rgba(226, 232, 240, 0.7);
+}
+
+.ph-table th {
+  background-color: rgba(248, 250, 252, 0.8);
+  color: #475569;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.category-column {
+  width: 220px;
+}
+
+.day-column {
+  text-align: center;
+}
+
+.day-name {
+  display: block;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.day-date {
+  display: block;
+  font-size: 0.75rem;
+  color: #64748b;
+  font-weight: 400;
+}
+
+/* En-tête de Catégorie */
+.category-row {
+  background-color: rgba(241, 245, 249, 0.9);
+}
+
+.category-cell {
+  padding: 10px 14px !important;
+  font-weight: 700;
+  color: #1e293b;
+  font-size: 0.85rem;
+}
+
+.category-count {
+  margin-left: 8px;
+  font-weight: 500;
+  font-size: 0.75rem;
+  color: #64748b;
+  background: rgba(255, 255, 255, 0.8);
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+
+.equipment-name {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+/* Interactions Cellules */
+.planning-cell {
+  text-align: center;
+  height: 54px;
+  cursor: pointer;
+  vertical-align: middle;
+  transition: all 0.15s ease;
+}
+
+.planning-cell:hover {
+  background-color: rgba(239, 246, 255, 0.6);
+}
+
+.empty-cell-add {
+  display: none;
+  color: #3b82f6;
+  font-weight: bold;
+  font-size: 1.2rem;
+}
+
+.planning-cell:hover .empty-cell-add {
+  display: block;
+}
+
+/* Cartes d'Événements */
+.event-detail {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #ffffff !important; /* Force la couleur du texte en blanc */
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2); /* Ajoute une ombre légère pour faire ressortir le texte */
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  transition: transform 0.15s ease;
+}
+
+.event-detail:hover {
+  transform: scale(1.03);
+}
+
+.event-detail.priority-urgente { background: linear-gradient(135deg, #ef4444, #dc2626); }
+.event-detail.priority-élevée { background: linear-gradient(135deg, #f59e0b, #d97706); }
+.event-detail.priority-normale { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+.event-detail.priority-faible { background: linear-gradient(135deg, #9ca3af, #6b7280); }
+
+.event-group {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.event-type {
+  font-size: 0.65rem;
+  opacity: 0.95;
+}
+
+/* ============================================
+   LÉGENDE
+   ============================================ */
+.ph-legend {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 20px;
+  font-size: 0.8rem;
+  color: #475569;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.legend-dot.urgent { background-color: #ef4444; }
+.legend-dot.high { background-color: #f59e0b; }
+.legend-dot.normal { background-color: #3b82f6; }
+.legend-dot.low { background-color: #9ca3af; }
+
+/* ============================================
+   MODALE DÉPOLIE
+   ============================================ */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(15, 23, 42, 0.4);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(16px);
+  width: 100%;
+  max-width: 520px;
+  max-height: 90vh;
+  overflow-y: auto;
+  border-radius: 16px;
+  padding: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  color: #0f172a;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+}
+
+.modal-close:hover {
+  color: #0f172a;
+  background: #f1f5f9;
+}
+
+/* Formulaire */
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.form-group label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+  padding: 8px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  color: #1e293b;
+  outline: none;
+  background: #ffffff;
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.form-group small {
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+/* Boutons d'Action Modale */
+.modal-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.modal-actions-right {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.btn-save, .btn-cancel, .btn-delete {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: all 0.2s ease;
+}
+
+.btn-save {
+  background-color: #2563eb;
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+}
+
+.btn-save:hover {
+  background-color: #1d4ed8;
+}
+
+.btn-cancel {
+  background-color: #f1f5f9;
+  color: #475569;
+}
+
+.btn-cancel:hover {
+  background-color: #e2e8f0;
+}
+
+.btn-delete {
+  background-color: #fef2f2;
+  color: #dc2626;
+}
+
+.btn-delete:hover {
+  background-color: #fee2e2;
+}

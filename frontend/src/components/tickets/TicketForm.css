@@ -1,0 +1,294 @@
+/* ==========================================================================
+   VARIABLES & DESIGN SYSTEM
+   ========================================================================== */
+:root {
+  --primary: #0284c7;
+  --primary-hover: #0369a1;
+  --primary-light: #e0f2fe;
+  
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+  
+  --bg-main: #f8fafc;
+  --bg-surface: #ffffff;
+  --border-color: #e2e8f0;
+  
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  
+  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 4px 12px -2px rgba(15, 23, 42, 0.08);
+
+  /* Couleurs de Priorité */
+  --priority-low-bg: #f1f5f9;     --priority-low-text: #475569;  --priority-low-border: #cbd5e1;
+  --priority-normal-bg: #e0f2fe;  --priority-normal-text: #0284c7; --priority-normal-border: #bae6fd;
+  --priority-high-bg: #ffedd5;    --priority-high-text: #ea580c;  --priority-high-border: #fed7aa;
+  --priority-urgent-bg: #fee2e2;  --priority-urgent-text: #dc2626;--priority-urgent-border: #fca5a5;
+}
+
+/* ==========================================================================
+   CONTENEUR PRINCIPAL
+   ========================================================================== */
+.ticket-form-container, 
+.intervenant-dashboard {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 28px 24px 50px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: var(--text-main);
+}
+
+/* Bouton Retour */
+.btn-back,
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-decoration: none;
+  margin-bottom: 20px;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s ease;
+}
+
+.btn-back:hover,
+.back-link:hover {
+  color: var(--primary);
+  border-color: var(--priority-normal-border);
+  background: var(--primary-light);
+}
+
+/* ==========================================================================
+   HEADER DE FORMULAIRE
+   ========================================================================== */
+.form-header,
+.dashboard-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  margin-bottom: 24px;
+  background: linear-gradient(135deg, #ffffff 0%, #f0f7ff 100%);
+  padding: 24px;
+  border-radius: var(--radius-lg);
+  border: 1px solid #bae6fd;
+  box-shadow: var(--shadow-sm);
+}
+
+.form-header svg,
+.form-header .header-icon {
+  width: 32px;
+  height: 32px;
+  color: var(--primary);
+  margin-bottom: 10px;
+  padding: 8px;
+  background: #ffffff;
+  border-radius: 50%;
+  box-shadow: var(--shadow-sm);
+}
+
+.form-header h1,
+.header-intro h1 {
+  margin: 0 0 6px 0;
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #1e3a8a;
+  letter-spacing: -0.01em;
+}
+
+.form-header p,
+.header-intro p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+/* ==========================================================================
+   FORMULAIRE & CARTES
+   ========================================================================== */
+.form-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 28px;
+  box-shadow: var(--shadow-sm);
+}
+
+/* En-tête de section */
+.section-title,
+.section-legend {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #1e3a8a;
+  background: var(--primary-light);
+  padding: 12px 18px;
+  border-radius: var(--radius-md);
+  margin-bottom: 24px;
+  border: 1px solid var(--priority-normal-border);
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 22px;
+}
+
+.form-label {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--text-main);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.required-star {
+  color: #dc2626;
+  margin-left: 2px;
+}
+
+/* Style des Inputs, Textareas et Selects */
+.form-control, 
+select.form-control,
+textarea.form-control {
+  width: 100%;
+  padding: 11px 15px;
+  background: #ffffff;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
+  color: var(--text-main);
+  box-sizing: border-box;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.form-control:hover, 
+select.form-control:hover {
+  border-color: #cbd5e1;
+}
+
+.form-control:focus,
+select.form-control:focus,
+textarea.form-control:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15);
+  background: #ffffff;
+}
+
+/* ==========================================================================
+   SÉLECTEUR DE PRIORITÉ (BOUTONS / BADGES)
+   ========================================================================== */
+.priority-selector,
+.priority-group {
+  display: flex;
+  gap: 12px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+.priority-btn,
+.priority-option {
+  flex: 1;
+  min-width: 110px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--bg-main);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: var(--text-muted);
+}
+
+.priority-btn:hover {
+  border-color: #cbd5e1;
+  background: #ffffff;
+  transform: translateY(-1px);
+}
+
+/* États Actifs */
+.priority-btn.low.active,
+.priority-btn[data-priority="low"].active {
+  background: var(--priority-low-bg);
+  color: var(--priority-low-text);
+  border-color: var(--priority-low-border);
+  box-shadow: 0 2px 6px rgba(71, 85, 105, 0.1);
+}
+
+.priority-btn.normal.active,
+.priority-btn[data-priority="normal"].active {
+  background: var(--priority-normal-bg);
+  color: var(--priority-normal-text);
+  border-color: var(--priority-normal-border);
+  box-shadow: 0 2px 6px rgba(2, 132, 199, 0.12);
+}
+
+.priority-btn.high.active,
+.priority-btn[data-priority="high"].active {
+  background: var(--priority-high-bg);
+  color: var(--priority-high-text);
+  border-color: var(--priority-high-border);
+  box-shadow: 0 2px 6px rgba(234, 88, 12, 0.12);
+}
+
+.priority-btn.urgent.active,
+.priority-btn[data-priority="urgent"].active {
+  background: var(--priority-urgent-bg);
+  color: var(--priority-urgent-text);
+  border-color: var(--priority-urgent-border);
+  box-shadow: 0 2px 6px rgba(220, 38, 38, 0.12);
+}
+
+/* ==========================================================================
+   BOUTON DE SOUMISSION
+   ========================================================================== */
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 28px;
+}
+
+.btn-submit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 24px;
+  background: var(--primary);
+  color: #ffffff;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(2, 132, 199, 0.2);
+}
+
+.btn-submit:hover {
+  background: var(--primary-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(2, 132, 199, 0.25);
+}
+
+.btn-submit:active {
+  transform: translateY(0);
+}
