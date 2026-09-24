@@ -8,6 +8,7 @@ import {
     FileText,
     Download,
     Edit3,
+    Play,
     ArrowLeft,
     CalendarDays,
     Clock3,
@@ -28,6 +29,7 @@ const InterventionDetail = () => {
     const [intervention, setIntervention] = useState(null);
     const [loading, setLoading] = useState(true);
     const [readings, setReadings] = useState([]);
+    const [starting, setStarting] = useState(false);
 
     // ============================================================
     // CHARGEMENT DE L'INTERVENTION
@@ -129,6 +131,82 @@ const InterventionDetail = () => {
         } finally {
 
             setLoading(false);
+
+        }
+    };
+
+    // ============================================================
+    // DÉMARRER L'INTERVENTION
+    // ============================================================
+
+    const handleStart = async () => {
+
+        if (!intervention || starting) {
+            return;
+        }
+
+        setStarting(true);
+
+        console.log(
+            '🚀 DÉMARRAGE INTERVENTION',
+            intervention.id
+        );
+
+        try {
+
+            const response = await api.post(
+                `/interventions/${intervention.id}/start`
+            );
+
+            console.log(
+                '🚀 RESPONSE START =',
+                response.data
+            );
+
+            if (response.data?.success) {
+
+                toast.success(
+                    'Intervention démarrée avec succès'
+                );
+
+                /*
+                 * On recharge complètement les données.
+                 * Cela permet notamment de récupérer :
+                 * - status = en_cours
+                 * - started_at
+                 * - le Reading créé automatiquement
+                 */
+                await fetchIntervention();
+
+            } else {
+
+                toast.error(
+                    response.data?.message ||
+                    'Impossible de démarrer l’intervention'
+                );
+
+            }
+
+        } catch (error) {
+
+            console.error(
+                '❌ Erreur démarrage intervention :',
+                error
+            );
+
+            console.error(
+                '❌ Response erreur start :',
+                error.response?.data
+            );
+
+            toast.error(
+                error.response?.data?.message ||
+                'Impossible de démarrer l’intervention'
+            );
+
+        } finally {
+
+            setStarting(false);
 
         }
     };
@@ -314,9 +392,32 @@ const InterventionDetail = () => {
             intervention.status
         );
 
+    // ============================================================
+    // MODIFICATION AUTORISÉE
+    // ============================================================
+
     const isEditable = [
         'en_attente',
         'en_cours'
+    ].includes(
+        intervention.status
+    );
+
+    // ============================================================
+    // DÉMARRAGE AUTORISÉ
+    //
+    // Le backend autorise le démarrage pour :
+    // - en_attente
+    // - en_retard
+    //
+    // Le backend vérifie également :
+    // - l'utilisateur / groupe affecté
+    // - la date et l'heure planifiées
+    // ============================================================
+
+    const canStart = [
+        'en_attente',
+        'en_retard'
     ].includes(
         intervention.status
     );
@@ -385,11 +486,53 @@ const InterventionDetail = () => {
 
                 <div className="header-actions">
 
+                    {/* =================================================
+                        BOUTON DÉMARRER
+                    ================================================== */}
+
+                    {canStart && (
+
+                        <button
+                            className="btn-start"
+                            onClick={handleStart}
+                            disabled={starting}
+                        >
+
+                            {starting ? (
+
+                                <>
+                                    <RefreshCw
+                                        size={17}
+                                        className="spin"
+                                    />
+
+                                    Démarrage...
+                                </>
+
+                            ) : (
+
+                                <>
+                                    <Play size={17} />
+
+                                    Démarrer
+                                </>
+
+                            )}
+
+                        </button>
+
+                    )}
+
+                    {/* =================================================
+                        BOUTON MODIFIER
+                    ================================================== */}
+
                     {isEditable && (
 
                         <button
                             className="btn-edit"
                             onClick={handleEdit}
+                            disabled={starting}
                         >
                             <Edit3 size={17} />
                             Modifier
@@ -397,9 +540,14 @@ const InterventionDetail = () => {
 
                     )}
 
+                    {/* =================================================
+                        BOUTON ACTUALISER
+                    ================================================== */}
+
                     <button
                         className="btn-refresh"
                         onClick={fetchIntervention}
+                        disabled={starting}
                     >
                         <RefreshCw size={17} />
                         Actualiser
@@ -805,7 +953,7 @@ const InterventionDetail = () => {
             )}
 
             {/* =====================================================
-                ⭐ RELEVÉ AFFECTÉ
+                RELEVÉ AFFECTÉ
             ====================================================== */}
 
             <div className="detail-section">
