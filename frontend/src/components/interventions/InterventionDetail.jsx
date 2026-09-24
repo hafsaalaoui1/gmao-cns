@@ -1,1045 +1,1479 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import {
-    ArrowLeft,
-    Calendar,
-    Clock,
-    ClipboardList,
-    FileText,
-    Loader2,
-    RefreshCw,
-    Wrench,
-    CheckCircle2,
-    AlertCircle,
-    PlayCircle,
-    Eye,
-    Save,
-    MessageSquare,
-    X,
-    ExternalLink,
-    Info,
-    History,
-    RotateCcw,
-    User,
-    ShieldAlert,
-    Building2,
-    Sliders,
-    ChevronRight,
-    Activity,
-    Download
-} from 'lucide-react';
-import { useNavigate, useParams } from 'react-router-dom';
-import toast from 'react-hot-toast';
-import * as XLSX from 'xlsx';
-
+import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../services/api';
+import { toast } from 'react-hot-toast';
+
+import {
+    RefreshCw,
+    FileText,
+    Download,
+    Edit3,
+    Play,
+    ArrowLeft,
+    CalendarDays,
+    Clock3,
+    Users,
+    Wrench,
+    ClipboardList,
+    AlertCircle,
+    CheckCircle2
+} from 'lucide-react';
+
 import './InterventionDetail.css';
 
-/* ==========================================================================
-   HELPERS & UTILS
-   ========================================================================== */
-
-const normalizeReadingValues = (values) => {
-    if (!values) return {};
-    if (typeof values === 'string') {
-        try { values = JSON.parse(values); } 
-        catch (error) { return {}; }
-    }
-    if (Array.isArray(values)) {
-        return values.reduce((acc, val, idx) => ({ ...acc, [idx]: val }), {});
-    }
-    return typeof values === 'object' && values !== null ? values : {};
-};
-
-const isMeaningfulValue = (val) => val !== null && val !== undefined && (typeof val !== 'string' || val.trim() !== '');
-
-const readingHasValues = (reading) => {
-    if (!reading) return false;
-    const values = normalizeReadingValues(reading.values);
-    return Object.keys(values).some(key => !String(key).startsWith('_') && isMeaningfulValue(values[key]));
-};
-
-const getReadingTime = (reading) => {
-    if (!reading) return 0;
-    const val = reading.taken_at || reading.created_at || reading.updated_at || 0;
-    const ts = new Date(val).getTime();
-    return Number.isNaN(ts) ? 0 : ts;
-};
-
-const normalizeKey = (key) => String(key ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase().replace(/[\s-]+/g, '_');
-
-const findValueByKeys = (values, possibleKeys) => {
-    const normalizedValues = normalizeReadingValues(values);
-    for (const key of possibleKeys) {
-        if (Object.prototype.hasOwnProperty.call(normalizedValues, key)) return normalizedValues[key];
-    }
-    const normalizedPossibleKeys = possibleKeys.map(normalizeKey);
-    for (const [existingKey, value] of Object.entries(normalizedValues)) {
-        if (normalizedPossibleKeys.includes(normalizeKey(existingKey))) return value;
-    }
-    return undefined;
-};
-
-const getParameterReadingValue = (values, parameter, parameterIndex, monitorIndex) => {
-    const monitorNum = monitorIndex + 1;
-    const parameterId = parameter?.id ?? parameter?.key ?? `parameter-${parameterIndex}`;
-    const parameterName = parameter?.name ?? parameter?.parameter ?? parameter?.label ?? `Paramètre ${parameterIndex + 1}`;
-
-    const possibleKeys = [
-        `${parameterId}_monitor_${monitorNum}`, `${parameterId}_moniteur_${monitorNum}`,
-        `${parameterName}_monitor_${monitorNum}`, `${parameterIndex + 1}_monitor_${monitorNum}`
-    ];
-
-    const directValue = findValueByKeys(values, possibleKeys);
-    if (directValue !== undefined && directValue !== null) return directValue;
-
-    const normalizedValues = normalizeReadingValues(values);
-    for (const key of [parameterId, parameterName, String(parameterIndex + 1)]) {
-        const nested = normalizedValues[key];
-        if (nested && typeof nested === 'object') {
-            const nestedValue = findValueByKeys(nested, [`monitor_${monitorNum}`, `moniteur_${monitorNum}`, String(monitorNum)]);
-            if (nestedValue !== undefined) return nestedValue;
-        }
-    }
-    return '';
-};
-
-const buildFormValuesFromReading = (reading, normalizedParameters) => {
-    const sourceValues = normalizeReadingValues(reading?.values);
-    const result = { ...sourceValues };
-
-    normalizedParameters.forEach((parameter, parameterIndex) => {
-        const monitors = Math.max(Number(parameter.monitors) || 1, 1);
-        for (let monitorIndex = 0; monitorIndex < monitors; monitorIndex++) {
-            const val = getParameterReadingValue(sourceValues, parameter, parameterIndex, monitorIndex);
-            if (val !== undefined && val !== null) {
-                const key = `${parameter.id || `parameter-${parameterIndex}`}_monitor_${monitorIndex + 1}`;
-                result[key] = val;
-            }
-        }
-    });
-
-    return result;
-};
-
-const buildReadingFormFromReading = (reading, normalizedParameters) => ({
-    values: buildFormValuesFromReading(reading, normalizedParameters),
-    observation: reading?.commentaire || reading?.comment || reading?.observation || '',
-    annexes: Array.isArray(reading?.annexes) ? reading.annexes : []
-});
-
-const formatDate = (date) => {
-    if (!date) return '—';
-    try { return new Date(date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }); }
-    catch { return date; }
-};
-
-const formatDateTime = (date) => {
-    if (!date) return '—';
-    try { return new Date(date).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); }
-    catch { return date; }
-};
-
-const getStatusConfig = (status) => {
-    const configs = {
-        planifiee: { label: 'Planifiée', class: 'status-planifiee', icon: Calendar },
-        en_attente: { label: 'En attente', class: 'status-planifiee', icon: Clock },
-        en_cours: { label: 'En cours', class: 'status-en-cours', icon: PlayCircle },
-        terminee: { label: 'Terminée', class: 'status-terminee', icon: CheckCircle2 },
-        validee: { label: 'Validée', class: 'status-validee', icon: CheckCircle2 },
-        valide: { label: 'Validé', class: 'status-validee', icon: CheckCircle2 },
-        rejetee: { label: 'Rejetée', class: 'status-rejetee', icon: AlertCircle },
-        rejete: { label: 'Rejeté', class: 'status-rejetee', icon: AlertCircle },
-        modifications_demandees: { label: 'Modifications requises', class: 'status-modifications', icon: RotateCcw },
-        cloturee: { label: 'Clôturée', class: 'status-terminee', icon: CheckCircle2 },
-        en_retard: { label: 'En retard', class: 'status-retard', icon: AlertCircle },
-    };
-    return configs[status] || { label: status || 'Inconnu', class: 'status-default', icon: Info };
-};
-
-const getPriorityConfig = (priority) => {
-    const configs = {
-        faible: { label: 'Faible', class: 'prio-faible' },
-        normale: { label: 'Normale', class: 'prio-normale' },
-        elevee: { label: 'Élevée', class: 'prio-elevee' },
-        urgente: { label: 'Urgente', class: 'prio-urgente' },
-    };
-    return configs[priority] || { label: priority || '—', class: '' };
-};
-
-/* ==========================================================================
-   HOOK DATA
-   ========================================================================== */
-
-const useInterventionData = (id) => {
-    const [intervention, setIntervention] = useState(null);
-    const [readings, setReadings] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [refreshing, setRefreshing] = useState(false);
-
-    const fetchIntervention = useCallback(async (showToast = false) => {
-        if (!id) return;
-        if (showToast) setRefreshing(true);
-        else setLoading(true);
-
-        try {
-            const response = await api.get(`/interventions/${id}`);
-            setIntervention(response.data?.data || response.data);
-
-            try {
-                const readingsResponse = await api.get(`/interventions/${id}/readings`);
-                const readingsData = readingsResponse.data?.data || readingsResponse.data || [];
-                setReadings(Array.isArray(readingsData) ? readingsData : []);
-            } catch (error) {
-                setReadings([]);
-            }
-
-            if (showToast) toast.success('Données actualisées');
-        } catch (error) {
-            toast.error(error.response?.data?.message || "Erreur de chargement.");
-            setIntervention(null);
-        } finally {
-            setLoading(false);
-            setRefreshing(false);
-        }
-    }, [id]);
-
-    useEffect(() => { fetchIntervention(); }, [fetchIntervention]);
-
-    return { intervention, readings, loading, refreshing, fetchIntervention };
-};
-
-/* ==========================================================================
-   MODAL RELEVÉ
-   ========================================================================== */
-
-const ReadingModal = ({
-    assignedCanvas,
-    intervention,
-    normalizedParameters,
-    monitorCount,
-    readingForm,
-    onValueChange,
-    onObservationChange,
-    onSave,
-    onClose,
-    saving,
-    equipmentName,
-    correctionMode,
-    readOnly,
-    activeReading,
-    onExportExcel
-}) => {
-    const statusCfg = getStatusConfig(activeReading?.validation_status);
-    const StatusIcon = statusCfg.icon;
-
-    return (
-        <div className="reading-modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-            <div className="reading-modal">
-                <div className="reading-modal-header">
-                    <div>
-                        <span className="modal-subtitle">
-                            {readOnly ? 'CONSULTATION DU RELEVÉ' : correctionMode ? 'MODIFICATION DU RELEVÉ' : 'RELEVÉ DE MAINTENANCE'}
-                        </span>
-                        <h2>{assignedCanvas.template_name || 'Fiche de Relevé'}</h2>
-                    </div>
-                    <button type="button" className="reading-modal-close" onClick={onClose} title="Fermer">
-                        <X size={20} />
-                    </button>
-                </div>
-
-                <div className="reading-modal-body">
-                    <div className="reading-document">
-                        {/* ENTÊTE PAPIER */}
-                        <div className="document-top">
-                            <div className="document-brand">
-                                <strong>ONDA</strong>
-                                <span>OFFICE NATIONAL DES AÉROPORTS</span>
-                            </div>
-                            <div className="document-code">
-                                <span>CODE DOCUMENT</span>
-                                <strong>{assignedCanvas.header?.code || '—'}</strong>
-                            </div>
-                        </div>
-
-                        <div className="document-division">
-                            {assignedCanvas.header?.division || 'DIVISION TECHNIQUE NAVIGATION AÉRIENNE'}
-                        </div>
-
-                        {/* BADGE STATUT INTERNE */}
-                        {activeReading?.validation_status && (
-                            <div className="reading-status-banner">
-                                <div className="status-banner-left">
-                                    <span className={`status-badge ${statusCfg.class}`}>
-                                        <StatusIcon size={14} /> {statusCfg.label}
-                                    </span>
-                                    {activeReading.validated_at && (
-                                        <span className="validated-at-text">
-                                            Validé le <strong>{formatDateTime(activeReading.validated_at)}</strong>
-                                        </span>
-                                    )}
-                                </div>
-                                {activeReading.validation_commentaire && (
-                                    <div className="validation-comment-box">
-                                        <MessageSquare size={14} />
-                                        <span><strong>Note responsable :</strong> {activeReading.validation_commentaire}</span>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-
-                        {/* IDENTIFICATION METIER */}
-                        <div className="document-identification">
-                            <div className="document-field">
-                                <span>AÉROPORT</span>
-                                <strong>{assignedCanvas.header?.aeroport || 'FES SAISS'}</strong>
-                            </div>
-                            <div className="document-field">
-                                <span>ÉQUIPEMENT</span>
-                                <strong>{assignedCanvas.equipment?.name || equipmentName}</strong>
-                            </div>
-                            <div className="document-field">
-                                <span>FRÉQUENCE</span>
-                                <strong>{assignedCanvas.frequency || '—'}</strong>
-                            </div>
-                            <div className="document-field">
-                                <span>DATE PLANNIFIÉE</span>
-                                <strong>{formatDate(intervention.scheduled_date)}</strong>
-                            </div>
-                        </div>
-
-                        {/* MATRICE DE RELEVÉ DES MESURES */}
-                        <div className="document-section">
-                            <div className="document-section-title">
-                                <Sliders size={16} /> RELEVÉ DES MESURES
-                            </div>
-
-                            {normalizedParameters.length > 0 ? (
-                                <div className="interactive-reading-table-wrapper">
-                                    <table className="interactive-reading-table">
-                                        <thead>
-                                            <tr>
-                                                <th>Paramètre</th>
-                                                <th>Unité</th>
-                                                {Array.from({ length: monitorCount }).map((_, i) => (
-                                                    <th key={i} className="text-center">Moniteur {i + 1}</th>
-                                                ))}
-                                                <th>Tolérance</th>
-                                                <th>Plage normale</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {normalizedParameters.map((param, pIdx) => (
-                                                <tr key={param.id || pIdx}>
-                                                    <td><strong>{param.name}</strong></td>
-                                                    <td><span className="unit-tag">{param.unit || '—'}</span></td>
-                                                    {Array.from({ length: monitorCount }).map((_, mIdx) => {
-                                                        const hasMonitor = mIdx < param.monitors;
-                                                        const key = `${param.id || `parameter-${pIdx}`}_monitor_${mIdx + 1}`;
-                                                        const val = readingForm.values[key] ?? '';
-
-                                                        return (
-                                                            <td key={mIdx} className="text-center">
-                                                                {hasMonitor ? (
-                                                                    readOnly ? (
-                                                                        <span className="value-display-only">
-                                                                            {val !== '' ? val : '—'}
-                                                                        </span>
-                                                                    ) : (
-                                                                        <input
-                                                                            type="text"
-                                                                            className="reading-input"
-                                                                            value={val}
-                                                                            onChange={(e) => onValueChange(param, pIdx, mIdx, e.target.value)}
-                                                                            placeholder="Saisir..."
-                                                                        />
-                                                                    )
-                                                                ) : (
-                                                                    <span className="cell-disabled">—</span>
-                                                                )}
-                                                            </td>
-                                                        );
-                                                    })}
-                                                    <td>{param.tolerance || '—'}</td>
-                                                    <td>
-                                                        <span className="range-badge">
-                                                            {param.normal_min && param.normal_max
-                                                                ? `${param.normal_min} – ${param.normal_max}`
-                                                                : param.normal_min ? `≥ ${param.normal_min}`
-                                                                : param.normal_max ? `≤ ${param.normal_max}` : '—'}
-                                                        </span>
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            ) : (
-                                <div className="empty-param-state">Aucun paramètre configuré dans ce modèle.</div>
-                            )}
-                        </div>
-
-                        {/* REMARQUES & OBSERVATIONS */}
-                        <div className="document-section">
-                            <div className="document-section-title">
-                                <MessageSquare size={16} /> OBSERVATIONS & REMARQUES
-                            </div>
-                            <textarea
-                                className="reading-observation"
-                                value={readingForm.observation}
-                                onChange={(e) => onObservationChange(e.target.value)}
-                                placeholder={readOnly ? "Aucune observation saisie." : "Saisissez vos observations, anomalies constatées..."}
-                                rows={3}
-                                readOnly={readOnly}
-                            />
-                        </div>
-
-                        {/* FOOTER & ACTIONS */}
-                        <div className="reading-save-area">
-                            <div className="reading-save-info">
-                                <Info size={18} />
-                                <div>
-                                    <strong>{readOnly ? 'Mode Consultation' : correctionMode ? 'Mode Correction' : 'Enregistrement'}</strong>
-                                    <span>{readOnly ? 'Les valeurs affichées correspondent au relevé enregistré.' : 'Les données seront soumises au système.'}</span>
-                                </div>
-                            </div>
-
-                            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-                                {readOnly && ['valide', 'validee', 'terminee'].includes(activeReading?.validation_status) && (
-                                    <button 
-                                        type="button" 
-                                        className="btn-excel-export" 
-                                        onClick={() => onExportExcel(activeReading)}
-                                    >
-                                        <Download size={15} /> Exporter Excel
-                                    </button>
-                                )}
-
-                                {!readOnly ? (
-                                    <button type="button" className="btn-save-reading" onClick={onSave} disabled={saving}>
-                                        {saving ? <Loader2 size={16} className="spin" /> : correctionMode ? <RotateCcw size={16} /> : <Save size={16} />}
-                                        {saving ? 'Enregistrement...' : correctionMode ? 'Soumettre correction' : 'Enregistrer le relevé'}
-                                    </button>
-                                ) : (
-                                    <button type="button" className="btn-secondary-action" onClick={onClose}>Fermer</button>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-};
-
-/* ==========================================================================
-   COMPOSANT PRINCIPAL
-   ========================================================================== */
-
 const InterventionDetail = () => {
+
     const { id } = useParams();
     const navigate = useNavigate();
-    const { intervention, readings, loading, refreshing, fetchIntervention } = useInterventionData(id);
 
-    const [activeTab, setActiveTab] = useState('general');
-    const [isReadingModalOpen, setIsReadingModalOpen] = useState(false);
-    const [savingReading, setSavingReading] = useState(false);
-    const [startingIntervention, setStartingIntervention] = useState(false);
-    const [completingIntervention, setCompletingIntervention] = useState(false);
-    
-    const [correctionMode, setCorrectionMode] = useState(false);
-    const [readOnlyReading, setReadOnlyReading] = useState(false);
-    const [selectedReading, setSelectedReading] = useState(null);
-    const [readingForm, setReadingForm] = useState({ values: {}, observation: '', annexes: [] });
+    const [intervention, setIntervention] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [readings, setReadings] = useState([]);
+    const [starting, setStarting] = useState(false);
 
-    const assignedCanvas = intervention?.template || null;
-
-    const normalizedParameters = useMemo(() => {
-        let params = assignedCanvas?.parameters;
-        if (!params) return [];
-        if (typeof params === 'string') {
-            try { params = JSON.parse(params); } catch (e) { return []; }
-        }
-        if (params && !Array.isArray(params) && typeof params === 'object' && Array.isArray(params.parameters)) {
-            params = params.parameters;
-        }
-        if (!Array.isArray(params)) return [];
-
-        return params.map((parameter, index) => {
-            if (!parameter) return null;
-            if (typeof parameter !== 'object') {
-                return { id: `parameter-${index}`, name: String(parameter), unit: '', monitors: 1, tolerance: '', normal_min: '', normal_max: '' };
-            }
-            return {
-                id: parameter.id ?? parameter.key ?? `parameter-${index}`,
-                name: parameter.name || parameter.parameter || parameter.label || `Paramètre ${index + 1}`,
-                unit: parameter.unit || parameter.unite || '',
-                monitors: Math.max(Number(parameter.monitors ?? parameter.monitor_count ?? parameter.nb_monitors) || 1, 1),
-                tolerance: parameter.tolerance || '',
-                normal_min: parameter.normal_min ?? parameter.normalMin ?? '',
-                normal_max: parameter.normal_max ?? parameter.normalMax ?? '',
-            };
-        }).filter(Boolean);
-    }, [assignedCanvas]);
-
-    const monitorCount = useMemo(() => {
-        if (normalizedParameters.length === 0) return 1;
-        return Math.max(...normalizedParameters.map(p => Number(p.monitors) || 1));
-    }, [normalizedParameters]);
-
-    const visibleReadings = useMemo(() => {
-        if (!Array.isArray(readings)) return [];
-        return readings.filter(r => r?.validation_status !== 'brouillon' || readingHasValues(r));
-    }, [readings]);
-
-    const latestReading = useMemo(() => {
-        if (!Array.isArray(visibleReadings) || visibleReadings.length === 0) return null;
-        return [...visibleReadings].sort((a, b) => getReadingTime(b) - getReadingTime(a))[0];
-    }, [visibleReadings]);
+    // ============================================================
+    // CHARGEMENT DE L'INTERVENTION
+    // ============================================================
 
     useEffect(() => {
-        const handleEscape = (e) => {
-            if (e.key === 'Escape') {
-                setIsReadingModalOpen(false);
-                setCorrectionMode(false);
-                setReadOnlyReading(false);
-            }
-        };
-        if (isReadingModalOpen) {
-            document.addEventListener('keydown', handleEscape);
-            document.body.style.overflow = 'hidden';
+        console.log('🔥🔥 INTERVENTION DETAIL CHARGÉ');
+        console.log('🔥 ID reçu dans URL =', id);
+
+        fetchIntervention();
+    }, [id]);
+
+    // ============================================================
+    // CHARGER L'INTERVENTION
+    // ============================================================
+
+    const fetchIntervention = async () => {
+
+        setLoading(true);
+
+        console.log('🔥 FETCH INTERVENTION');
+        console.log('🔥 ID =', id);
+
+        try {
+
+            const response = await api.get(
+                `/interventions/${id}`
+            );
+
+            console.log(
+                '🔥 RESPONSE API =',
+                response.data
+            );
+
+            const interventionData =
+                response.data?.data ||
+                response.data;
+
+            console.log(
+                '🔥 INTERVENTION COMPLETE =',
+                interventionData
+            );
+
+            console.log(
+                '🔥 TEMPLATE / RELEVÉ AFFECTÉ =',
+                interventionData?.template
+            );
+
+            console.log(
+                '🔥 TEMPLATE ID =',
+                interventionData?.template_id
+            );
+
+            console.log(
+                '🔥 READINGS / MESURES =',
+                interventionData?.readings
+            );
+
+            // ====================================================
+            // INTERVENTION
+            // ====================================================
+
+            setIntervention(
+                interventionData
+            );
+
+            // ====================================================
+            // RELEVÉS SAISIS
+            // ====================================================
+
+            setReadings(
+                Array.isArray(
+                    interventionData?.readings
+                )
+                    ? interventionData.readings
+                    : []
+            );
+
+        } catch (error) {
+
+            console.error(
+                '❌ Erreur chargement intervention :',
+                error
+            );
+
+            console.error(
+                '❌ Response erreur :',
+                error.response?.data
+            );
+
+            toast.error(
+                'Impossible de charger les détails de l’intervention'
+            );
+
+            navigate(
+                '/my-interventions'
+            );
+
+        } finally {
+
+            setLoading(false);
+
         }
-        return () => {
-            document.removeEventListener('keydown', handleEscape);
-            document.body.style.overflow = '';
-        };
-    }, [isReadingModalOpen]);
-
-    const equipmentName = useMemo(() => intervention?.equipment?.name || intervention?.equipment?.nom || `Équipement #${intervention?.equipment_id || '—'}`, [intervention]);
-    const groupName = useMemo(() => intervention?.group?.name || intervention?.group?.nom || 'Non affecté', [intervention]);
-    const userName = useMemo(() => {
-        const u = intervention?.user;
-        if (!u) return 'Non assigné';
-        return u.name || `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.email;
-    }, [intervention]);
-
-    const handleReadingChange = (param, pIdx, mIdx, val) => {
-        const key = `${param.id || `parameter-${pIdx}`}_monitor_${mIdx + 1}`;
-        setReadingForm(prev => ({ ...prev, values: { ...prev.values, [key]: val } }));
     };
 
-    const handleObservationChange = (val) => setReadingForm(prev => ({ ...prev, observation: val }));
+    // ============================================================
+    // DÉMARRER L'INTERVENTION
+    // ============================================================
 
-    /* EXPORT EXCEL */
-    const exportReadingToExcel = (readingToExport) => {
-        if (!readingToExport) {
-            toast.error("Aucun relevé à exporter.");
+    const handleStart = async () => {
+
+        if (!intervention || starting) {
             return;
         }
 
-        const dateSaisie = formatDateTime(readingToExport.taken_at || readingToExport.created_at);
-        const dateValidation = formatDateTime(readingToExport.validated_at);
-        const staticValues = normalizeReadingValues(readingToExport.values);
+        setStarting(true);
 
-        const excelData = [
-            ["RAPPORT DE RELEVÉ DE MAINTENANCE"],
-            [""],
-            ["RÉFÉRENCE & ÉQUIPEMENT"],
-            ["Intervention ID", `#${intervention.id}`],
-            ["Équipement", equipmentName],
-            ["Type d'équipement", intervention.equipment?.type || '—'],
-            ["Aéroport", assignedCanvas?.header?.aeroport || 'FES SAISS'],
-            ["Groupe", groupName],
-            ["Technicien / Intervenant", userName],
-            [""],
-            ["DÉTAILS DU RELEVÉ"],
-            ["Modèle de relevé", assignedCanvas?.template_name || '—'],
-            ["Fréquence", assignedCanvas?.frequency || '—'],
-            ["Date de réalisation", dateSaisie],
-            ["Statut de validation", readingToExport.validation_status || 'Validé'],
-            ["Date de validation", dateValidation],
-            ["Remarque responsable", readingToExport.validation_commentaire || '—'],
-            ["Observations technicien", readingToExport.commentaire || readingToExport.observation || '—'],
-            [""],
-            ["MESURES ET PARAMÈTRES"]
-        ];
+        console.log(
+            '🚀 DÉMARRAGE INTERVENTION',
+            intervention.id
+        );
 
-        const headers = ["Paramètre", "Unité"];
-        for (let i = 1; i <= monitorCount; i++) {
-            headers.push(`Moniteur ${i}`);
-        }
-        headers.push("Tolérance", "Plage normale");
-        excelData.push(headers);
+        try {
 
-        normalizedParameters.forEach((param, pIdx) => {
-            const row = [param.name, param.unit || '—'];
+            const response = await api.post(
+                `/interventions/${intervention.id}/start`
+            );
 
-            for (let mIdx = 0; mIdx < monitorCount; mIdx++) {
-                const hasMonitor = mIdx < param.monitors;
-                if (hasMonitor) {
-                    const val = getParameterReadingValue(staticValues, param, pIdx, mIdx);
-                    row.push(val !== '' && val !== undefined ? val : '—');
-                } else {
-                    row.push('N/A');
-                }
+            console.log(
+                '🚀 RESPONSE START =',
+                response.data
+            );
+
+            if (response.data?.success) {
+
+                toast.success(
+                    'Intervention démarrée avec succès'
+                );
+
+                /*
+                 * On recharge complètement les données.
+                 * Cela permet notamment de récupérer :
+                 * - status = en_cours
+                 * - started_at
+                 * - le Reading créé automatiquement
+                 */
+                await fetchIntervention();
+
+            } else {
+
+                toast.error(
+                    response.data?.message ||
+                    'Impossible de démarrer l’intervention'
+                );
+
             }
 
-            row.push(param.tolerance || '—');
-            
-            const range = param.normal_min && param.normal_max
-                ? `${param.normal_min} – ${param.normal_max}`
-                : param.normal_min ? `≥ ${param.normal_min}`
-                : param.normal_max ? `≤ ${param.normal_max}` : '—';
-            row.push(range);
+        } catch (error) {
 
-            excelData.push(row);
-        });
+            console.error(
+                '❌ Erreur démarrage intervention :',
+                error
+            );
 
-        const worksheet = XLSX.utils.aoa_to_sheet(excelData);
-        worksheet['!cols'] = [
-            { wch: 30 },
-            { wch: 12 },
-            ...Array(monitorCount).fill({ wch: 15 }),
-            { wch: 15 },
-            { wch: 20 }
-        ];
+            console.error(
+                '❌ Response erreur start :',
+                error.response?.data
+            );
 
-        const workbook = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(workbook, worksheet, "Relevé");
+            toast.error(
+                error.response?.data?.message ||
+                'Impossible de démarrer l’intervention'
+            );
 
-        const fileName = `Releve_Intervention_${intervention.id}_${equipmentName.replace(/[^a-zA-Z0-9]/g, '_')}.xlsx`;
-        XLSX.writeFile(workbook, fileName);
-        
-        toast.success("Export Excel généré avec succès !");
-    };
+        } finally {
 
-    /* ACTIONS MODALE */
-    const openNewReading = () => { 
-        setCorrectionMode(false); 
-        setReadOnlyReading(false); 
-        setSelectedReading(null);
-        setReadingForm({ values: {}, observation: '', annexes: [] }); 
-        setIsReadingModalOpen(true); 
-    };
+            setStarting(false);
 
-    const openCorrectionReading = () => { 
-        setCorrectionMode(true); 
-        setReadOnlyReading(false); 
-        if (latestReading) {
-            setSelectedReading(latestReading);
-            setReadingForm(buildReadingFormFromReading(latestReading, normalizedParameters));
         }
-        setIsReadingModalOpen(true); 
     };
 
-    const openReadingReadOnly = (targetReading = latestReading) => { 
-        if (targetReading) {
-            setSelectedReading(targetReading);
-            setReadingForm(buildReadingFormFromReading(targetReading, normalizedParameters));
+    // ============================================================
+    // MODIFIER
+    // ============================================================
+
+    const handleEdit = () => {
+
+        navigate(
+            `/interventions/${intervention.id}/edit`
+        );
+
+    };
+
+    // ============================================================
+    // TÉLÉCHARGER PDF
+    // ============================================================
+
+    const downloadPdf = async () => {
+
+        try {
+
+            const response = await api.get(
+                `/interventions/${id}/download-pdf`,
+                {
+                    responseType: 'blob'
+                }
+            );
+
+            const url =
+                window.URL.createObjectURL(
+                    new Blob([response.data])
+                );
+
+            const link =
+                document.createElement('a');
+
+            link.href = url;
+
+            link.setAttribute(
+                'download',
+                `releve_${id}.pdf`
+            );
+
+            document.body.appendChild(link);
+
+            link.click();
+
+            link.remove();
+
+            window.URL.revokeObjectURL(url);
+
+        } catch (error) {
+
+            console.error(
+                'Erreur téléchargement PDF :',
+                error
+            );
+
+            toast.error(
+                'Erreur lors du téléchargement du PDF'
+            );
+
         }
-        setCorrectionMode(false); 
-        setReadOnlyReading(true); 
-        setIsReadingModalOpen(true); 
     };
 
-    const handleStartIntervention = async () => {
-        try {
-            setStartingIntervention(true);
-            await api.post(`/interventions/${id}/start`);
-            toast.success("Intervention démarrée.");
-            await fetchIntervention();
-        } catch (error) {
-            toast.error(error.response?.data?.message || "Erreur au démarrage.");
-        } finally { setStartingIntervention(false); }
+    // ============================================================
+    // BADGE STATUT
+    // ============================================================
+
+    const getStatusBadge = (status) => {
+
+        const map = {
+
+            en_attente: {
+                label: 'Planifiée',
+                className: 'status-planifiee',
+                icon: <CalendarDays size={16} />
+            },
+
+            en_cours: {
+                label: 'En cours',
+                className: 'status-en-cours',
+                icon: <Clock3 size={16} />
+            },
+
+            terminee: {
+                label: 'Terminée',
+                className: 'status-terminee',
+                icon: <CheckCircle2 size={16} />
+            },
+
+            validee: {
+                label: 'Validée',
+                className: 'status-validee',
+                icon: <CheckCircle2 size={16} />
+            },
+
+            en_retard: {
+                label: 'En retard',
+                className: 'status-retard',
+                icon: <AlertCircle size={16} />
+            }
+
+        };
+
+        return (
+            map[status] || {
+                label: status || 'Inconnu',
+                className: 'status-default',
+                icon: <AlertCircle size={16} />
+            }
+        );
     };
 
-    const handleSaveReading = async () => {
-        try {
-            setSavingReading(true);
-            const templateId = intervention.template_id || assignedCanvas.id;
-            const payload = {
-                template_id: templateId,
-                canvas_id: templateId,
-                values: normalizeReadingValues(readingForm.values),
-                commentaire: readingForm.observation,
-                taken_at: new Date().toISOString(),
-            };
-            await api.post(`/interventions/${id}/readings`, payload);
-            toast.success("Relevé sauvegardé.");
-            setIsReadingModalOpen(false);
-            await fetchIntervention();
-        } catch (error) {
-            toast.error(error.response?.data?.message || "Erreur de sauvegarde.");
-        } finally { setSavingReading(false); }
-    };
-
-    const handleCompleteIntervention = async () => {
-        try {
-            setCompletingIntervention(true);
-            await api.post(`/interventions/${id}/complete`, {
-                diagnostic: intervention.diagnostic || '',
-                actions: intervention.actions || '',
-                observations: intervention.observations || '',
-            });
-            toast.success("Intervention clôturée.");
-            await fetchIntervention();
-        } catch (error) {
-            toast.error(error.response?.data?.message || "Erreur de finalisation.");
-        } finally { setCompletingIntervention(false); }
-    };
+    // ============================================================
+    // CHARGEMENT
+    // ============================================================
 
     if (loading) {
+
         return (
-            <div className="intervention-detail loader-state">
-                <Loader2 size={36} className="spin text-blue" />
-                <p>Chargement de la fiche d'intervention...</p>
+
+            <div className="loading-state">
+
+                <RefreshCw
+                    size={36}
+                    className="spin"
+                />
+
+                <p>
+                    Chargement des détails...
+                </p>
+
             </div>
+
         );
     }
+
+    // ============================================================
+    // INTERVENTION INTROUVABLE
+    // ============================================================
 
     if (!intervention) {
+
         return (
-            <div className="intervention-detail loader-state">
-                <AlertCircle size={48} className="text-red" />
-                <h2>Intervention introuvable</h2>
-                <button type="button" className="btn-secondary-action" onClick={() => navigate(-1)}>
-                    <ArrowLeft size={16} /> Retour à la liste
+
+            <div className="empty-state">
+
+                <AlertCircle size={42} />
+
+                <h3>
+                    Intervention introuvable
+                </h3>
+
+                <p>
+                    Cette intervention n'existe pas
+                    ou a été supprimée.
+                </p>
+
+                <button
+                    onClick={() =>
+                        navigate('/my-interventions')
+                    }
+                    className="btn-primary"
+                >
+                    <ArrowLeft size={18} />
+                    Retour à la liste
                 </button>
+
             </div>
         );
     }
 
-    const statusConfig = getStatusConfig(intervention.status);
-    const StatusIcon = statusConfig.icon;
-    const priorityConfig = getPriorityConfig(intervention.priority);
+    // ============================================================
+    // INFORMATIONS
+    // ============================================================
 
-    const isPending = ['en_attente', 'planifiee'].includes(intervention.status);
-    const isInProgress = intervention.status === 'en_cours';
-    const latestReadingStatus = latestReading?.validation_status;
-    const canCorrectReading = !!latestReading && ['rejete', 'rejetee', 'modifications_demandees', 'valide'].includes(latestReadingStatus);
+    const statusInfo =
+        getStatusBadge(
+            intervention.status
+        );
+
+    // ============================================================
+    // MODIFICATION AUTORISÉE
+    // ============================================================
+
+    const isEditable = [
+        'en_attente',
+        'en_cours'
+    ].includes(
+        intervention.status
+    );
+
+    // ============================================================
+    // DÉMARRAGE AUTORISÉ
+    //
+    // Le backend autorise le démarrage pour :
+    // - en_attente
+    // - en_retard
+    //
+    // Le backend vérifie également :
+    // - l'utilisateur / groupe affecté
+    // - la date et l'heure planifiées
+    // ============================================================
+
+    const canStart = [
+        'en_attente',
+        'en_retard'
+    ].includes(
+        intervention.status
+    );
+
+    // ============================================================
+    // RELEVÉ AFFECTÉ
+    //
+    // IMPORTANT :
+    // intervention.template = relevé affecté
+    // intervention.readings = mesures réellement saisies
+    // ============================================================
+
+    const assignedCanvas =
+        intervention.template || null;
+
+    // ============================================================
+    // RENDER
+    // ============================================================
 
     return (
+
         <div className="intervention-detail">
-            {/* HEADER */}
-            <header className="detail-header">
+
+            {/* =====================================================
+                HEADER
+            ====================================================== */}
+
+            <div className="detail-header">
+
                 <div className="header-left">
-                    <button type="button" className="back-button" onClick={() => navigate(-1)} title="Retour">
-                        <ArrowLeft size={18} />
+
+                    <button
+                        className="back-button"
+                        onClick={() =>
+                            navigate('/my-interventions')
+                        }
+                        title="Retour"
+                    >
+                        <ArrowLeft size={20} />
                     </button>
+
                     <div>
-                        <div className="page-breadcrumbs">
-                            <span>Interventions</span> <ChevronRight size={12} /> <span>Détail #{intervention.id}</span>
+
+                        <div className="page-kicker">
+                            DÉTAIL DE L'INTERVENTION
                         </div>
-                        <h1>Fiche d'Intervention #{intervention.id}</h1>
+
+                        <h1>
+                            Intervention #{intervention.id}
+                        </h1>
+
+                        <div className="header-status">
+
+                            <span
+                                className={`status-badge ${statusInfo.className}`}
+                            >
+                                {statusInfo.icon}
+                                {statusInfo.label}
+                            </span>
+
+                        </div>
+
                     </div>
+
                 </div>
 
                 <div className="header-actions">
-                    <span className={`status-badge ${statusConfig.class}`}>
-                        <StatusIcon size={14} /> {statusConfig.label}
+
+                    {/* =================================================
+                        BOUTON DÉMARRER
+                    ================================================== */}
+
+                    {canStart && (
+
+                        <button
+                            className="btn-start"
+                            onClick={handleStart}
+                            disabled={starting}
+                        >
+
+                            {starting ? (
+
+                                <>
+                                    <RefreshCw
+                                        size={17}
+                                        className="spin"
+                                    />
+
+                                    Démarrage...
+                                </>
+
+                            ) : (
+
+                                <>
+                                    <Play size={17} />
+
+                                    Démarrer
+                                </>
+
+                            )}
+
+                        </button>
+
+                    )}
+
+                    {/* =================================================
+                        BOUTON MODIFIER
+                    ================================================== */}
+
+                    {isEditable && (
+
+                        <button
+                            className="btn-edit"
+                            onClick={handleEdit}
+                            disabled={starting}
+                        >
+                            <Edit3 size={17} />
+                            Modifier
+                        </button>
+
+                    )}
+
+                    {/* =================================================
+                        BOUTON ACTUALISER
+                    ================================================== */}
+
+                    <button
+                        className="btn-refresh"
+                        onClick={fetchIntervention}
+                        disabled={starting}
+                    >
+                        <RefreshCw size={17} />
+                        Actualiser
+                    </button>
+
+                </div>
+
+            </div>
+
+            {/* =====================================================
+                RÉSUMÉ RAPIDE
+            ====================================================== */}
+
+            <div className="detail-summary">
+
+                <div className="summary-item">
+
+                    <div className="summary-icon">
+                        <Wrench size={20} />
+                    </div>
+
+                    <div>
+
+                        <span>
+                            Équipement
+                        </span>
+
+                        <strong>
+                            {intervention.equipment?.name ||
+                                'Non renseigné'}
+                        </strong>
+
+                    </div>
+
+                </div>
+
+                <div className="summary-item">
+
+                    <div className="summary-icon">
+                        <CalendarDays size={20} />
+                    </div>
+
+                    <div>
+
+                        <span>
+                            Date planifiée
+                        </span>
+
+                        <strong>
+                            {intervention.scheduled_date ||
+                                '-'}
+                        </strong>
+
+                    </div>
+
+                </div>
+
+                <div className="summary-item">
+
+                    <div className="summary-icon">
+                        <Clock3 size={20} />
+                    </div>
+
+                    <div>
+
+                        <span>
+                            Heure
+                        </span>
+
+                        <strong>
+                            {intervention.scheduled_time ||
+                                '-'}
+                        </strong>
+
+                    </div>
+
+                </div>
+
+                <div className="summary-item">
+
+                    <div className="summary-icon">
+                        <Users size={20} />
+                    </div>
+
+                    <div>
+
+                        <span>
+                            Groupe
+                        </span>
+
+                        <strong>
+                            {intervention.group?.name ||
+                                'Non affecté'}
+                        </strong>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+            {/* =====================================================
+                INFORMATIONS PRINCIPALES
+            ====================================================== */}
+
+            <div className="detail-grid">
+
+                {/* Équipement */}
+
+                <div className="detail-card">
+
+                    <div className="card-title">
+
+                        <div className="card-icon">
+                            <Wrench size={18} />
+                        </div>
+
+                        <h3>
+                            Équipement
+                        </h3>
+
+                    </div>
+
+                    <div className="card-content">
+
+                        <p className="equipment-name">
+                            {intervention.equipment?.name ||
+                                'N/A'}
+                        </p>
+
+                        <span className="equipment-type">
+                            {intervention.equipment?.type ||
+                                'Type non renseigné'}
+                        </span>
+
+                    </div>
+
+                </div>
+
+                {/* Type & priorité */}
+
+                <div className="detail-card">
+
+                    <div className="card-title">
+
+                        <div className="card-icon">
+                            <ClipboardList size={18} />
+                        </div>
+
+                        <h3>
+                            Type & priorité
+                        </h3>
+
+                    </div>
+
+                    <div className="info-list">
+
+                        <div className="info-row">
+
+                            <span>
+                                Type
+                            </span>
+
+                            <strong>
+                                {intervention.type ||
+                                    '-'}
+                            </strong>
+
+                        </div>
+
+                        <div className="info-row">
+
+                            <span>
+                                Priorité
+                            </span>
+
+                            <strong>
+                                {intervention.priority ||
+                                    '-'}
+                            </strong>
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+                {/* Planification */}
+
+                <div className="detail-card">
+
+                    <div className="card-title">
+
+                        <div className="card-icon">
+                            <CalendarDays size={18} />
+                        </div>
+
+                        <h3>
+                            Planification
+                        </h3>
+
+                    </div>
+
+                    <div className="info-list">
+
+                        <div className="info-row">
+
+                            <span>
+                                Date
+                            </span>
+
+                            <strong>
+                                {intervention.scheduled_date ||
+                                    '-'}
+                            </strong>
+
+                        </div>
+
+                        <div className="info-row">
+
+                            <span>
+                                Heure
+                            </span>
+
+                            <strong>
+                                {intervention.scheduled_time ||
+                                    '-'}
+                            </strong>
+
+                        </div>
+
+                        <div className="info-row">
+
+                            <span>
+                                Durée
+                            </span>
+
+                            <strong>
+                                {intervention.duration
+                                    ? `${intervention.duration} min`
+                                    : '-'}
+                            </strong>
+
+                        </div>
+
+                        {intervention.deadline && (
+
+                            <div className="info-row">
+
+                                <span>
+                                    Délai
+                                </span>
+
+                                <strong>
+                                    {intervention.deadline}
+                                </strong>
+
+                            </div>
+
+                        )}
+
+                    </div>
+
+                </div>
+
+                {/* Affectation */}
+
+                <div className="detail-card">
+
+                    <div className="card-title">
+
+                        <div className="card-icon">
+                            <Users size={18} />
+                        </div>
+
+                        <h3>
+                            Affectation
+                        </h3>
+
+                    </div>
+
+                    <div className="info-list">
+
+                        <div className="info-row">
+
+                            <span>
+                                Groupe
+                            </span>
+
+                            <strong>
+                                {intervention.group?.name ||
+                                    'Non affecté'}
+                            </strong>
+
+                        </div>
+
+                        <div className="info-row">
+
+                            <span>
+                                Intervenant
+                            </span>
+
+                            <strong>
+                                {intervention.user?.name ||
+                                    'Non affecté'}
+                            </strong>
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+                {/* Statut */}
+
+                <div className="detail-card status-card">
+
+                    <div className="card-title">
+
+                        <div className="card-icon">
+                            <ClipboardList size={18} />
+                        </div>
+
+                        <h3>
+                            État de l'intervention
+                        </h3>
+
+                    </div>
+
+                    <div className="status-display">
+
+                        <span
+                            className={`status-badge large ${statusInfo.className}`}
+                        >
+                            {statusInfo.icon}
+                            {statusInfo.label}
+                        </span>
+
+                        <p>
+
+                            {intervention.status ===
+                                'en_attente' &&
+                                "L’intervention est planifiée et attend son exécution."}
+
+                            {intervention.status ===
+                                'en_cours' &&
+                                "L’intervention est actuellement en cours d’exécution."}
+
+                            {intervention.status ===
+                                'terminee' &&
+                                "L’intervention est terminée et attend la validation du responsable."}
+
+                            {intervention.status ===
+                                'validee' &&
+                                "L’intervention a été validée et clôturée."}
+
+                            {intervention.status ===
+                                'en_retard' &&
+                                "Cette intervention a dépassé le délai prévu."}
+
+                        </p>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+            {/* =====================================================
+                DESCRIPTION
+            ====================================================== */}
+
+            {intervention.description && (
+
+                <div className="detail-section">
+
+                    <div className="section-header">
+
+                        <div>
+
+                            <span className="section-kicker">
+                                INFORMATIONS
+                            </span>
+
+                            <h2>
+                                Description
+                            </h2>
+
+                        </div>
+
+                    </div>
+
+                    <div className="description-box">
+
+                        <p>
+                            {intervention.description}
+                        </p>
+
+                    </div>
+
+                </div>
+
+            )}
+
+            {/* =====================================================
+                RELEVÉ AFFECTÉ
+            ====================================================== */}
+
+            <div className="detail-section">
+
+                <div className="section-header">
+
+                    <div>
+
+                        <span className="section-kicker">
+                            RELEVÉ
+                        </span>
+
+                        <h2>
+                            Relevé affecté à l'intervention
+                        </h2>
+
+                    </div>
+
+                    <ClipboardList size={22} />
+
+                </div>
+
+                {assignedCanvas ? (
+
+                    <div className="assigned-reading">
+
+                        {/* Nom */}
+
+                        <div className="info-row">
+
+                            <span>
+                                Nom du relevé
+                            </span>
+
+                            <strong>
+                                {assignedCanvas.template_name ||
+                                    'Sans nom'}
+                            </strong>
+
+                        </div>
+
+                        {/* Type */}
+
+                        <div className="info-row">
+
+                            <span>
+                                Type
+                            </span>
+
+                            <strong>
+                                {assignedCanvas.template_type ||
+                                    '-'}
+                            </strong>
+
+                        </div>
+
+                        {/* Fréquence */}
+
+                        <div className="info-row">
+
+                            <span>
+                                Fréquence
+                            </span>
+
+                            <strong>
+                                {assignedCanvas.frequency ||
+                                    '-'}
+                            </strong>
+
+                        </div>
+
+                        {/* Équipement */}
+
+                        <div className="info-row">
+
+                            <span>
+                                Équipement
+                            </span>
+
+                            <strong>
+                                {assignedCanvas.equipment?.name ||
+                                    intervention.equipment?.name ||
+                                    '-'}
+                            </strong>
+
+                        </div>
+
+                        {/* Paramètres */}
+
+                        {Array.isArray(
+                            assignedCanvas.parameters
+                        ) &&
+                        assignedCanvas.parameters.length > 0 && (
+
+                            <div className="reading-parameters">
+
+                                <strong>
+                                    Paramètres à relever :
+                                </strong>
+
+                                <ul>
+
+                                    {assignedCanvas.parameters.map(
+                                        (parameter, index) => (
+
+                                            <li key={index}>
+
+                                                {typeof parameter ===
+                                                'string'
+                                                    ? parameter
+                                                    : parameter?.name ||
+                                                      parameter?.label ||
+                                                      parameter?.parameter ||
+                                                      JSON.stringify(
+                                                          parameter
+                                                      )}
+
+                                            </li>
+
+                                        )
+                                    )}
+
+                                </ul>
+
+                            </div>
+
+                        )}
+
+                        {/* Header du relevé */}
+
+                        {assignedCanvas.header &&
+                        typeof assignedCanvas.header ===
+                            'object' && (
+
+                            <div className="reading-header-info">
+
+                                <strong>
+                                    Informations du relevé :
+                                </strong>
+
+                                <pre>
+                                    {JSON.stringify(
+                                        assignedCanvas.header,
+                                        null,
+                                        2
+                                    )}
+                                </pre>
+
+                            </div>
+
+                        )}
+
+                        {/* PDF */}
+
+                        {(intervention.reading_pdf_path ||
+                            assignedCanvas.reading_pdf_path) && (
+
+                            <div className="pdf-card">
+
+                                <div className="pdf-info">
+
+                                    <FileText size={24} />
+
+                                    <div>
+
+                                        <strong>
+                                            Document de relevé
+                                        </strong>
+
+                                        <span>
+                                            Document associé à cette intervention
+                                        </span>
+
+                                    </div>
+
+                                </div>
+
+                                <div className="pdf-actions">
+
+                                    <button
+                                        onClick={downloadPdf}
+                                        className="btn-secondary"
+                                    >
+                                        <Download size={16} />
+                                        Télécharger
+                                    </button>
+
+                                    <a
+                                        href={
+                                            intervention.reading_pdf_path ||
+                                            assignedCanvas.reading_pdf_path
+                                        }
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="btn-secondary"
+                                    >
+                                        <FileText size={16} />
+                                        Consulter
+                                    </a>
+
+                                </div>
+
+                            </div>
+
+                        )}
+
+                    </div>
+
+                ) : (
+
+                    <div className="no-readings">
+
+                        <ClipboardList size={32} />
+
+                        <strong>
+                            Aucun relevé affecté
+                        </strong>
+
+                        <p>
+                            Aucun relevé n'est associé à cette intervention.
+                        </p>
+
+                        <small>
+                            template_id :
+                            {' '}
+                            {intervention.template_id ||
+                                'null'}
+                        </small>
+
+                    </div>
+
+                )}
+
+            </div>
+
+            {/* =====================================================
+                RELEVÉS / MESURES SAISIS
+            ====================================================== */}
+
+            <div className="detail-section">
+
+                <div className="section-header">
+
+                    <div>
+
+                        <span className="section-kicker">
+                            MESURES
+                        </span>
+
+                        <h2>
+                            Relevés de l'intervention
+                        </h2>
+
+                    </div>
+
+                    <span className="reading-count">
+
+                        {readings.length}
+
+                        {' '}
+
+                        relevé
+                        {readings.length > 1
+                            ? 's'
+                            : ''}
+
                     </span>
 
-                    <button type="button" className="btn-refresh" onClick={() => fetchIntervention(true)} disabled={refreshing}>
-                        <RefreshCw size={14} className={refreshing ? 'spin' : ''} />
-                    </button>
-
-                    {isPending && (
-                        <button type="button" className="btn-primary-action" onClick={handleStartIntervention} disabled={startingIntervention}>
-                            {startingIntervention ? <Loader2 size={15} className="spin" /> : <PlayCircle size={15} />}
-                            Démarrer
-                        </button>
-                    )}
-
-                    {isInProgress && assignedCanvas && (
-                        <button type="button" className="btn-secondary-action" onClick={openNewReading}>
-                            <ClipboardList size={15} /> Saisir Relevé
-                        </button>
-                    )}
-
-                    {isInProgress && (
-                        <button type="button" className="btn-success-action" onClick={handleCompleteIntervention} disabled={completingIntervention}>
-                            {completingIntervention ? <Loader2 size={15} className="spin" /> : <CheckCircle2 size={15} />}
-                            Finaliser
-                        </button>
-                    )}
-
-                    <button type="button" className="btn-edit" onClick={() => navigate(`/interventions/${intervention.id}/edit`)}>
-                        <Wrench size={14} /> Modifier
-                    </button>
                 </div>
-            </header>
 
-            {/* KPI BAR */}
-            <div className="detail-summary-bar">
-                <div className="summary-pill">
-                    <div className="pill-icon"><Wrench size={18} /></div>
-                    <div>
-                        <span>Équipement</span>
-                        <strong>{equipmentName}</strong>
-                    </div>
-                </div>
-                <div className="summary-divider" />
-                <div className="summary-pill">
-                    <div className="pill-icon"><Calendar size={18} /></div>
-                    <div>
-                        <span>Date prévue</span>
-                        <strong>{formatDate(intervention.scheduled_date)}</strong>
-                    </div>
-                </div>
-                <div className="summary-divider" />
-                <div className="summary-pill">
-                    <div className="pill-icon"><Clock size={18} /></div>
-                    <div>
-                        <span>Heure</span>
-                        <strong>{intervention.scheduled_time || '—'}</strong>
-                    </div>
-                </div>
-                <div className="summary-divider" />
-                <div className="summary-pill">
-                    <div className="pill-icon"><ShieldAlert size={18} /></div>
-                    <div>
-                        <span>Priorité</span>
-                        <strong className={`priority-tag ${priorityConfig.class}`}>{priorityConfig.label}</strong>
-                    </div>
-                </div>
-            </div>
+                {readings.length > 0 ? (
 
-            {/* NAVIGATION TABS */}
-            <div className="navigation-tabs">
-                <button
-                    className={`tab-btn ${activeTab === 'general' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('general')}
-                >
-                    <Info size={16} /> Informations Générales
-                </button>
-                <button
-                    className={`tab-btn ${activeTab === 'readings' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('readings')}
-                >
-                    <FileText size={16} /> Relevé & Historique ({visibleReadings.length})
-                </button>
-            </div>
+                    <div className="readings-table-wrapper">
 
-            {/* TAB 1: INFORMATIONS GENERALES */}
-            {activeTab === 'general' && (
-                <div className="tab-content-grid">
-                    <div className="detail-grid-compact">
-                        <div className="detail-card-section">
-                            <div className="card-section-header">
-                                <div className="card-section-title">
-                                    <Building2 size={18} />
-                                    <h3>Équipement & Affectation</h3>
-                                </div>
-                            </div>
-                            <div className="card-section-body">
-                                <div className="info-grid">
-                                    <div className="info-item">
-                                        <span className="info-label">Équipement Cible</span>
-                                        <strong className="info-value">{equipmentName}</strong>
-                                    </div>
-                                    <div className="info-item">
-                                        <span className="info-label">Type / Référence</span>
-                                        <span className="info-value">{intervention.equipment?.type || '—'} {intervention.equipment?.reference && `(${intervention.equipment.reference})`}</span>
-                                    </div>
-                                    <div className="info-item">
-                                        <span className="info-label">Groupe d'affectation</span>
-                                        <strong className="info-value">{groupName}</strong>
-                                    </div>
-                                    <div className="info-item">
-                                        <span className="info-label">Technicien Référent</span>
-                                        <strong className="info-value"><User size={14} className="inline-icon" /> {userName}</strong>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
+                        <table className="readings-table">
 
-                        <div className="detail-card-section">
-                            <div className="card-section-header">
-                                <div className="card-section-title">
-                                    <Activity size={18} />
-                                    <h3>Planification & Suivi</h3>
-                                </div>
-                            </div>
-                            <div className="card-section-body">
-                                <div className="info-grid">
-                                    <div className="info-item">
-                                        <span className="info-label">Type de maintenance</span>
-                                        <strong className="info-value">{intervention.type || '—'}</strong>
-                                    </div>
-                                    <div className="info-item">
-                                        <span className="info-label">Durée Estimée</span>
-                                        <span className="info-value">{intervention.duration ? `${intervention.duration} min` : '—'}</span>
-                                    </div>
-                                    <div className="info-item">
-                                        <span className="info-label">Date Limite</span>
-                                        <span className="info-value">{formatDate(intervention.deadline)}</span>
-                                    </div>
-                                    <div className="info-item">
-                                        <span className="info-label">Début Réel</span>
-                                        <span className="info-value">{formatDateTime(intervention.started_at)}</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                            <thead>
 
-                    {intervention.description && (
-                        <div className="detail-section-compact">
-                            <div className="section-header-compact">
-                                <Info size={16} />
-                                <h2>Description / Instructions Métier</h2>
-                            </div>
-                            <div className="description-content">
-                                <p>{intervention.description}</p>
-                            </div>
-                        </div>
-                    )}
-                </div>
-            )}
+                                <tr>
 
-            {/* TAB 2: RELEVÉS & HISTORIQUE */}
-            {activeTab === 'readings' && (
-                <div className="tab-content-stack">
-                    <div className="detail-section-compact">
-                        <div className="section-header-compact">
-                            <FileText size={16} />
-                            <h2>Modèle de Relevé Rattaché</h2>
-                        </div>
+                                    <th>
+                                        Paramètre
+                                    </th>
 
-                        {assignedCanvas ? (
-                            <div className="reading-banner">
-                                <div className="reading-banner-left">
-                                    <div className="reading-banner-icon"><ClipboardList size={22} /></div>
-                                    <div className="reading-banner-details">
-                                        <div className="reading-banner-title">
-                                            <h3>{assignedCanvas.template_name || 'Relevé Standard'}</h3>
-                                            {assignedCanvas.template_type && (
-                                                <span className="reading-badge-type">{assignedCanvas.template_type}</span>
-                                            )}
-                                        </div>
-                                        <div className="reading-banner-sub">
-                                            <span>{normalizedParameters.length} paramètres répertoriés</span>
-                                            <span>•</span>
-                                            <span>Fréquence : {assignedCanvas.frequency || 'N/A'}</span>
-                                        </div>
-                                    </div>
-                                </div>
+                                    <th>
+                                        Valeur attendue
+                                    </th>
 
-                                <div className="reading-banner-actions">
-                                    {isInProgress && (
-                                        <button type="button" className="btn-open-reading" onClick={openNewReading}>
-                                            <Eye size={15} /> Saisir le formulaire <ExternalLink size={13} />
-                                        </button>
-                                    )}
+                                    <th>
+                                        Valeur mesurée
+                                    </th>
 
-                                    {canCorrectReading && (
-                                        <button type="button" className="btn-open-reading warning" onClick={openCorrectionReading}>
-                                            <RotateCcw size={15} /> Modifier les données <ExternalLink size={13} />
-                                        </button>
-                                    )}
+                                    <th>
+                                        Statut
+                                    </th>
 
-                                    {!isInProgress && !canCorrectReading && (
-                                        <button type="button" className="btn-open-reading" onClick={() => openReadingReadOnly(latestReading)}>
-                                            <Eye size={15} /> Consulter <ExternalLink size={13} />
-                                        </button>
-                                    )}
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="no-assigned-reading">
-                                <ClipboardList size={22} />
-                                <span>Aucun formulaire de relevé n'est configuré pour cette intervention.</span>
-                            </div>
-                        )}
-                    </div>
+                                    <th>
+                                        Commentaire
+                                    </th>
 
-                    {/* HISTORIQUE DE TOUS LES RELEVÉS SAISIS */}
-                    {visibleReadings.length > 0 && (
-                        <div className="detail-section-compact">
-                            <div className="section-header-compact">
-                                <History size={16} />
-                                <h2>Historique des Relevés Effectués</h2>
-                            </div>
-                            <div className="reading-history">
-                                {[...visibleReadings]
-                                    .sort((a, b) => getReadingTime(b) - getReadingTime(a))
-                                    .map((reading, index) => {
-                                        const rStatus = getStatusConfig(reading.validation_status);
-                                        const RIcon = rStatus.icon;
-                                        const isValidated = ['valide', 'validee', 'terminee'].includes(reading.validation_status);
+                                </tr>
 
-                                        return (
-                                            <div 
-                                                className="reading-history-item clickable" 
-                                                key={reading.id || index}
-                                                onClick={() => openReadingReadOnly(reading)}
-                                                title="Cliquer pour voir les valeurs saisies"
-                                            >
-                                                <div className="reading-history-main">
-                                                    <div className="reading-history-icon"><FileText size={17} /></div>
-                                                    <div>
-                                                        <strong>Relevé #{reading.id || index + 1}</strong>
-                                                        <span className="history-date">Saisi le {formatDateTime(reading.taken_at || reading.created_at)}</span>
-                                                        {reading.validation_commentaire && (
-                                                            <p className="history-comment">"{reading.validation_commentaire}"</p>
+                            </thead>
+
+                            <tbody>
+
+                                {readings.map(
+                                    (reading, index) => (
+
+                                        <tr
+                                            key={
+                                                reading.id ||
+                                                index
+                                            }
+                                        >
+
+                                            <td>
+
+                                                <strong>
+                                                    {reading.parameter ||
+                                                        '-'}
+                                                </strong>
+
+                                            </td>
+
+                                            <td>
+                                                {reading.expected_value ||
+                                                    '-'}
+                                            </td>
+
+                                            <td>
+                                                {reading.measured_value ||
+                                                    '-'}
+                                            </td>
+
+                                            <td>
+
+                                                <span
+                                                    className={`reading-status ${reading.status || ''}`}
+                                                >
+
+                                                    {reading.status ===
+                                                        'normal' &&
+                                                        '✓ Normal'}
+
+                                                    {reading.status ===
+                                                        'attention' &&
+                                                        '⚠ Attention'}
+
+                                                    {reading.status ===
+                                                        'alerte' &&
+                                                        '● Alerte'}
+
+                                                    {![
+                                                        'normal',
+                                                        'attention',
+                                                        'alerte'
+                                                    ].includes(
+                                                        reading.status
+                                                    ) &&
+                                                        (
+                                                            reading.status ||
+                                                            '-'
                                                         )}
-                                                    </div>
-                                                </div>
-                                                <div className="reading-history-right">
-                                                    <span className={`status-badge ${rStatus.class}`}>
-                                                        <RIcon size={14} /> {rStatus.label}
-                                                    </span>
 
-                                                    {isValidated && (
-                                                        <button
-                                                            type="button"
-                                                            className="btn-excel-export-sm"
-                                                            title="Exporter en Excel"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                exportReadingToExcel(reading);
-                                                            }}
-                                                        >
-                                                            <Download size={13} /> Excel
-                                                        </button>
-                                                    )}
+                                                </span>
 
-                                                    <button type="button" className="btn-open-reading-icon">
-                                                        <Eye size={15} />
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                            </div>
-                        </div>
-                    )}
+                                            </td>
+
+                                            <td>
+
+                                                {reading.comment ||
+                                                    '-'}
+
+                                            </td>
+
+                                        </tr>
+
+                                    )
+                                )}
+
+                            </tbody>
+
+                        </table>
+
+                    </div>
+
+                ) : (
+
+                    <div className="no-readings">
+
+                        <ClipboardList size={32} />
+
+                        <strong>
+                            Aucun relevé disponible
+                        </strong>
+
+                        <p>
+                            Aucune mesure n'a encore été
+                            enregistrée pour cette intervention.
+                        </p>
+
+                        {assignedCanvas && (
+
+                            <small>
+
+                                Le relevé «{' '}
+
+                                {assignedCanvas.template_name ||
+                                    'Sans nom'}
+
+                                {' '}» est bien affecté.
+
+                                Les mesures apparaîtront ici
+                                après leur saisie.
+
+                            </small>
+
+                        )}
+
+                    </div>
+
+                )}
+
+            </div>
+
+            {/* =====================================================
+                INFORMATIONS SYSTÈME
+            ====================================================== */}
+
+            <div className="detail-section">
+
+                <div className="section-header">
+
+                    <div>
+
+                        <span className="section-kicker">
+                            SYSTÈME
+                        </span>
+
+                        <h2>
+                            Informations système
+                        </h2>
+
+                    </div>
+
                 </div>
-            )}
 
-            {/* MODALE D'AFFICHAGE DU RELEVÉ */}
-            {isReadingModalOpen && assignedCanvas && (
-                <ReadingModal
-                    assignedCanvas={assignedCanvas}
-                    intervention={intervention}
-                    normalizedParameters={normalizedParameters}
-                    monitorCount={monitorCount}
-                    readingForm={readingForm}
-                    onValueChange={handleReadingChange}
-                    onObservationChange={handleObservationChange}
-                    onSave={handleSaveReading}
-                    onClose={() => {
-                        setIsReadingModalOpen(false);
-                        setCorrectionMode(false);
-                        setReadOnlyReading(false);
-                    }}
-                    saving={savingReading}
-                    equipmentName={equipmentName}
-                    correctionMode={correctionMode}
-                    readOnly={readOnlyReading}
-                    activeReading={selectedReading || latestReading}
-                    onExportExcel={exportReadingToExcel}
-                />
-            )}
+                <div className="detail-grid">
+
+                    <div className="detail-card">
+
+                        <div className="info-list">
+
+                            <div className="info-row">
+
+                                <span>
+                                    Créée le
+                                </span>
+
+                                <strong>
+                                    {intervention.created_at
+                                        ? new Date(
+                                            intervention.created_at
+                                        ).toLocaleString(
+                                            'fr-FR'
+                                        )
+                                        : '-'}
+                                </strong>
+
+                            </div>
+
+                            {intervention.started_at && (
+
+                                <div className="info-row">
+
+                                    <span>
+                                        Début
+                                    </span>
+
+                                    <strong>
+                                        {new Date(
+                                            intervention.started_at
+                                        ).toLocaleString(
+                                            'fr-FR'
+                                        )}
+                                    </strong>
+
+                                </div>
+
+                            )}
+
+                            {intervention.completed_at && (
+
+                                <div className="info-row">
+
+                                    <span>
+                                        Fin
+                                    </span>
+
+                                    <strong>
+                                        {new Date(
+                                            intervention.completed_at
+                                        ).toLocaleString(
+                                            'fr-FR'
+                                        )}
+                                    </strong>
+
+                                </div>
+
+                            )}
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+            </div>
+
         </div>
     );
 };
