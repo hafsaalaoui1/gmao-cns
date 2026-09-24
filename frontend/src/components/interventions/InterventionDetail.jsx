@@ -1,447 +1,574 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import api from '../../services/api';
 import { toast } from 'react-hot-toast';
 
 import {
-    RefreshCw,
-    FileText,
-    Download,
-    Edit3,
-    Play,
     ArrowLeft,
     CalendarDays,
+    CheckCircle2,
     Clock3,
+    Download,
+    Edit3,
+    FileText,
+    RefreshCw,
+    User,
     Users,
     Wrench,
     ClipboardList,
     AlertCircle,
-    CheckCircle2
+    ChevronRight,
+    X,
+    Eye,
+    Activity,
+    Hash,
+    Timer,
+    Gauge,
+    FileSpreadsheet,
 } from 'lucide-react';
 
 import './InterventionDetail.css';
 
 const InterventionDetail = () => {
-
     const { id } = useParams();
     const navigate = useNavigate();
 
     const [intervention, setIntervention] = useState(null);
     const [loading, setLoading] = useState(true);
-    const [readings, setReadings] = useState([]);
+    const [refreshing, setRefreshing] = useState(false);
     const [starting, setStarting] = useState(false);
+
+    const [activeTab, setActiveTab] = useState('details');
+
+    const [readings, setReadings] = useState([]);
+
+    const [selectedReading, setSelectedReading] = useState(null);
+    const [readingModalOpen, setReadingModalOpen] = useState(false);
 
     // ============================================================
     // CHARGEMENT DE L'INTERVENTION
     // ============================================================
 
-    useEffect(() => {
-        console.log('🔥🔥 INTERVENTION DETAIL CHARGÉ');
-        console.log('🔥 ID reçu dans URL =', id);
-
-        fetchIntervention();
-    }, [id]);
-
-    // ============================================================
-    // CHARGER L'INTERVENTION
-    // ============================================================
-
-    const fetchIntervention = async () => {
-
-        setLoading(true);
-
-        console.log('🔥 FETCH INTERVENTION');
-        console.log('🔥 ID =', id);
-
+    const fetchIntervention = async (showLoader = true) => {
         try {
+            if (showLoader) {
+                setLoading(true);
+            } else {
+                setRefreshing(true);
+            }
 
-            const response = await api.get(
-                `/interventions/${id}`
-            );
-
-            console.log(
-                '🔥 RESPONSE API =',
-                response.data
-            );
+            const response = await api.get(`/interventions/${id}`);
 
             const interventionData =
-                response.data?.data ||
-                response.data;
+                response?.data?.data ??
+                response?.data ??
+                null;
 
-            console.log(
-                '🔥 INTERVENTION COMPLETE =',
-                interventionData
-            );
+            if (!interventionData) {
+                throw new Error('Intervention introuvable');
+            }
 
-            console.log(
-                '🔥 TEMPLATE / RELEVÉ AFFECTÉ =',
-                interventionData?.template
-            );
-
-            console.log(
-                '🔥 TEMPLATE ID =',
-                interventionData?.template_id
-            );
-
-            console.log(
-                '🔥 READINGS / MESURES =',
-                interventionData?.readings
-            );
-
-            // ====================================================
-            // INTERVENTION
-            // ====================================================
-
-            setIntervention(
-                interventionData
-            );
-
-            // ====================================================
-            // RELEVÉS SAISIS
-            // ====================================================
+            setIntervention(interventionData);
 
             setReadings(
-                Array.isArray(
-                    interventionData?.readings
-                )
+                Array.isArray(interventionData.readings)
                     ? interventionData.readings
                     : []
             );
-
         } catch (error) {
-
             console.error(
-                '❌ Erreur chargement intervention :',
+                'Erreur chargement intervention :',
                 error
             );
 
-            console.error(
-                '❌ Response erreur :',
-                error.response?.data
-            );
-
             toast.error(
-                'Impossible de charger les détails de l’intervention'
+                error?.response?.data?.message ||
+                'Impossible de charger l’intervention.'
             );
-
-            navigate(
-                '/my-interventions'
-            );
-
         } finally {
-
             setLoading(false);
-
+            setRefreshing(false);
         }
     };
+
+    useEffect(() => {
+        if (id) {
+            fetchIntervention(true);
+        }
+    }, [id]);
 
     // ============================================================
     // DÉMARRER L'INTERVENTION
     // ============================================================
 
     const handleStart = async () => {
-
         if (!intervention || starting) {
             return;
         }
 
-        setStarting(true);
-
-        console.log(
-            '🚀 DÉMARRAGE INTERVENTION',
-            intervention.id
-        );
-
         try {
+            setStarting(true);
 
             const response = await api.post(
                 `/interventions/${intervention.id}/start`
             );
 
-            console.log(
-                '🚀 RESPONSE START =',
-                response.data
-            );
+            const updatedIntervention =
+                response?.data?.data ??
+                null;
 
-            if (response.data?.success) {
+            if (updatedIntervention) {
+                setIntervention(updatedIntervention);
 
-                toast.success(
-                    'Intervention démarrée avec succès'
+                setReadings(
+                    Array.isArray(updatedIntervention.readings)
+                        ? updatedIntervention.readings
+                        : []
                 );
-
-                /*
-                 * On recharge complètement les données.
-                 * Cela permet notamment de récupérer :
-                 * - status = en_cours
-                 * - started_at
-                 * - le Reading créé automatiquement
-                 */
-                await fetchIntervention();
-
             } else {
-
-                toast.error(
-                    response.data?.message ||
-                    'Impossible de démarrer l’intervention'
-                );
-
+                await fetchIntervention(false);
             }
 
+            toast.success(
+                'Intervention démarrée avec succès.'
+            );
         } catch (error) {
-
             console.error(
-                '❌ Erreur démarrage intervention :',
+                'Erreur démarrage intervention :',
                 error
             );
 
-            console.error(
-                '❌ Response erreur start :',
-                error.response?.data
-            );
-
             toast.error(
-                error.response?.data?.message ||
-                'Impossible de démarrer l’intervention'
+                error?.response?.data?.message ||
+                'Impossible de démarrer l’intervention.'
             );
-
         } finally {
-
             setStarting(false);
-
         }
     };
 
     // ============================================================
-    // MODIFIER
-    // ============================================================
-
-    const handleEdit = () => {
-
-        navigate(
-            `/interventions/${intervention.id}/edit`
-        );
-
-    };
-
-    // ============================================================
-    // TÉLÉCHARGER PDF
+    // TÉLÉCHARGEMENT PDF
     // ============================================================
 
     const downloadPdf = async () => {
+        if (!intervention) {
+            return;
+        }
 
         try {
-
             const response = await api.get(
-                `/interventions/${id}/download-pdf`,
+                `/interventions/${intervention.id}/download-pdf`,
                 {
-                    responseType: 'blob'
+                    responseType: 'blob',
                 }
             );
 
-            const url =
-                window.URL.createObjectURL(
-                    new Blob([response.data])
-                );
-
-            const link =
-                document.createElement('a');
-
-            link.href = url;
-
-            link.setAttribute(
-                'download',
-                `releve_${id}.pdf`
+            const blob = new Blob(
+                [response.data],
+                {
+                    type:
+                        response.headers?.['content-type'] ||
+                        'application/pdf',
+                }
             );
 
+            const url = window.URL.createObjectURL(blob);
+
+            const link = document.createElement('a');
+            link.href = url;
+            link.download =
+                `intervention-${intervention.id}.pdf`;
+
             document.body.appendChild(link);
-
             link.click();
-
             link.remove();
 
             window.URL.revokeObjectURL(url);
 
+            toast.success('PDF téléchargé.');
         } catch (error) {
-
             console.error(
                 'Erreur téléchargement PDF :',
                 error
             );
 
             toast.error(
-                'Erreur lors du téléchargement du PDF'
+                'Impossible de télécharger le PDF.'
             );
-
         }
     };
 
     // ============================================================
-    // BADGE STATUT
+    // MODALE RELEVÉ
     // ============================================================
 
-    const getStatusBadge = (status) => {
+    const openReading = (reading) => {
+        setSelectedReading(reading);
+        setReadingModalOpen(true);
+    };
 
-        const map = {
-
-            en_attente: {
-                label: 'Planifiée',
-                className: 'status-planifiee',
-                icon: <CalendarDays size={16} />
-            },
-
-            en_cours: {
-                label: 'En cours',
-                className: 'status-en-cours',
-                icon: <Clock3 size={16} />
-            },
-
-            terminee: {
-                label: 'Terminée',
-                className: 'status-terminee',
-                icon: <CheckCircle2 size={16} />
-            },
-
-            validee: {
-                label: 'Validée',
-                className: 'status-validee',
-                icon: <CheckCircle2 size={16} />
-            },
-
-            en_retard: {
-                label: 'En retard',
-                className: 'status-retard',
-                icon: <AlertCircle size={16} />
-            }
-
-        };
-
-        return (
-            map[status] || {
-                label: status || 'Inconnu',
-                className: 'status-default',
-                icon: <AlertCircle size={16} />
-            }
-        );
+    const closeReading = () => {
+        setSelectedReading(null);
+        setReadingModalOpen(false);
     };
 
     // ============================================================
-    // CHARGEMENT
+    // HELPERS
     // ============================================================
 
-    if (loading) {
+    const formatDate = (date) => {
+        if (!date) {
+            return '—';
+        }
 
-        return (
+        try {
+            return new Intl.DateTimeFormat(
+                'fr-FR',
+                {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric',
+                }
+            ).format(new Date(date));
+        } catch {
+            return date;
+        }
+    };
 
-            <div className="loading-state">
+    const formatDateTime = (date) => {
+        if (!date) {
+            return '—';
+        }
 
-                <RefreshCw
-                    size={36}
-                    className="spin"
-                />
+        try {
+            return new Intl.DateTimeFormat(
+                'fr-FR',
+                {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                }
+            ).format(new Date(date));
+        } catch {
+            return date;
+        }
+    };
 
-                <p>
-                    Chargement des détails...
-                </p>
+    const formatTime = (time) => {
+        if (!time) {
+            return '—';
+        }
 
-            </div>
+        return String(time).substring(0, 5);
+    };
 
-        );
-    }
+    const getStatusLabel = (status) => {
+        switch (status) {
+            case 'en_attente':
+                return 'En attente';
+
+            case 'en_cours':
+                return 'En cours';
+
+            case 'terminee':
+                return 'Terminée';
+
+            case 'validee':
+                return 'Validée';
+
+            case 'en_retard':
+                return 'En retard';
+
+            case 'annulee':
+                return 'Annulée';
+
+            default:
+                return status || '—';
+        }
+    };
+
+    const getStatusClass = (status) => {
+        switch (status) {
+            case 'en_attente':
+                return 'status-planifiee';
+
+            case 'en_cours':
+                return 'status-en-cours';
+
+            case 'terminee':
+                return 'status-terminee';
+
+            case 'validee':
+                return 'status-validee';
+
+            case 'en_retard':
+                return 'status-retard';
+
+            case 'annulee':
+                return 'status-rejetee';
+
+            default:
+                return 'status-planifiee';
+        }
+    };
+
+    const getPriorityLabel = (priority) => {
+        switch (priority) {
+            case 'urgente':
+                return 'Urgente';
+
+            case 'elevee':
+            case 'haute':
+                return 'Élevée';
+
+            case 'normale':
+            case 'normal':
+                return 'Normale';
+
+            case 'faible':
+                return 'Faible';
+
+            default:
+                return priority || '—';
+        }
+    };
+
+    const getPriorityClass = (priority) => {
+        switch (priority) {
+            case 'urgente':
+                return 'prio-urgente';
+
+            case 'elevee':
+            case 'haute':
+                return 'prio-elevee';
+
+            case 'normale':
+            case 'normal':
+                return 'prio-normale';
+
+            default:
+                return '';
+        }
+    };
+
+    const getReadingStatusLabel = (status) => {
+        switch (status) {
+            case 'valide':
+            case 'validee':
+                return 'Validé';
+
+            case 'rejete':
+            case 'rejetee':
+                return 'Rejeté';
+
+            case 'modifications_demandees':
+                return 'Modifications demandées';
+
+            case 'brouillon':
+                return 'Brouillon';
+
+            default:
+                return status || '—';
+        }
+    };
+
+    const getReadingStatusClass = (status) => {
+        switch (status) {
+            case 'valide':
+            case 'validee':
+                return 'status-terminee';
+
+            case 'rejete':
+            case 'rejetee':
+                return 'status-rejetee';
+
+            case 'modifications_demandees':
+                return 'status-modifications';
+
+            default:
+                return 'status-planifiee';
+        }
+    };
+
+    const getDisplayStateLabel = () => {
+        if (!intervention) {
+            return '';
+        }
+
+        if (intervention.status === 'validee') {
+            return 'Intervention validée';
+        }
+
+        if (intervention.status === 'terminee') {
+            return 'En attente de validation';
+        }
+
+        if (intervention.status === 'en_cours') {
+            return 'Intervention en cours';
+        }
+
+        if (intervention.status === 'en_retard') {
+            return 'Intervention en retard';
+        }
+
+        if (intervention.status === 'annulee') {
+            return 'Intervention annulée';
+        }
+
+        return 'Intervention planifiée';
+    };
+
+    const getReadingValues = (reading) => {
+        if (!reading) {
+            return {};
+        }
+
+        if (
+            reading.values &&
+            typeof reading.values === 'object'
+        ) {
+            return reading.values;
+        }
+
+        return {};
+    };
 
     // ============================================================
-    // INTERVENTION INTROUVABLE
+    // DONNÉES CALCULÉES
     // ============================================================
 
-    if (!intervention) {
+    const equipment = intervention?.equipment || null;
+    const group = intervention?.group || null;
+    const user = intervention?.user || null;
 
-        return (
+    const assignedTemplate =
+        intervention?.template ||
+        intervention?.reading_template ||
+        null;
 
-            <div className="empty-state">
+    const planningTemplate =
+        intervention?.planningTemplate ||
+        intervention?.planning_template ||
+        null;
 
-                <AlertCircle size={42} />
-
-                <h3>
-                    Intervention introuvable
-                </h3>
-
-                <p>
-                    Cette intervention n'existe pas
-                    ou a été supprimée.
-                </p>
-
-                <button
-                    onClick={() =>
-                        navigate('/my-interventions')
-                    }
-                    className="btn-primary"
-                >
-                    <ArrowLeft size={18} />
-                    Retour à la liste
-                </button>
-
-            </div>
-        );
-    }
-
-    // ============================================================
-    // INFORMATIONS
-    // ============================================================
-
-    const statusInfo =
-        getStatusBadge(
+    const canStart =
+        intervention &&
+        ['en_attente', 'en_retard'].includes(
             intervention.status
         );
 
-    // ============================================================
-    // MODIFICATION AUTORISÉE
-    // ============================================================
+    const canEdit =
+        intervention &&
+        ['en_attente', 'en_cours'].includes(
+            intervention.status
+        );
 
-    const isEditable = [
-        'en_attente',
-        'en_cours'
-    ].includes(
-        intervention.status
+    const statusClass = getStatusClass(
+        intervention?.status
     );
 
-    // ============================================================
-    // DÉMARRAGE AUTORISÉ
-    //
-    // Le backend autorise le démarrage pour :
-    // - en_attente
-    // - en_retard
-    //
-    // Le backend vérifie également :
-    // - l'utilisateur / groupe affecté
-    // - la date et l'heure planifiées
-    // ============================================================
-
-    const canStart = [
-        'en_attente',
-        'en_retard'
-    ].includes(
-        intervention.status
+    const statusLabel = getStatusLabel(
+        intervention?.status
     );
 
+    const priorityClass = getPriorityClass(
+        intervention?.priority
+    );
+
+    const readingCount = readings.length;
+
+    const latestReading = useMemo(() => {
+        if (!readings.length) {
+            return null;
+        }
+
+        return [...readings].sort((a, b) => {
+            const dateA =
+                new Date(
+                    a.taken_at ||
+                    a.created_at ||
+                    0
+                ).getTime();
+
+            const dateB =
+                new Date(
+                    b.taken_at ||
+                    b.created_at ||
+                    0
+                ).getTime();
+
+            return dateB - dateA;
+        })[0];
+    }, [readings]);
+
     // ============================================================
-    // RELEVÉ AFFECTÉ
-    //
-    // IMPORTANT :
-    // intervention.template = relevé affecté
-    // intervention.readings = mesures réellement saisies
+    // LOADING
     // ============================================================
 
-    const assignedCanvas =
-        intervention.template || null;
+    if (loading) {
+        return (
+            <div className="intervention-detail">
+                <div className="loader-state">
+                    <RefreshCw
+                        size={32}
+                        className="spin"
+                    />
+
+                    <span>
+                        Chargement de l’intervention...
+                    </span>
+                </div>
+            </div>
+        );
+    }
+
+    // ============================================================
+    // EMPTY
+    // ============================================================
+
+    if (!intervention) {
+        return (
+            <div className="intervention-detail">
+                <div className="empty-state">
+                    <AlertCircle size={42} />
+
+                    <h3>
+                        Intervention introuvable
+                    </h3>
+
+                    <p>
+                        L’intervention demandée
+                        n’existe pas ou n’est plus
+                        disponible.
+                    </p>
+
+                    <button
+                        type="button"
+                        className="btn-primary"
+                        onClick={() =>
+                            navigate('/interventions')
+                        }
+                    >
+                        <ArrowLeft size={16} />
+
+                        Retour aux interventions
+                    </button>
+                </div>
+            </div>
+        );
+    }
 
     // ============================================================
     // RENDER
     // ============================================================
 
     return (
-
         <div className="intervention-detail">
 
-            {/* =====================================================
+            {/* ======================================================
                 HEADER
             ====================================================== */}
 
@@ -450,9 +577,10 @@ const InterventionDetail = () => {
                 <div className="header-left">
 
                     <button
+                        type="button"
                         className="back-button"
                         onClick={() =>
-                            navigate('/my-interventions')
+                            navigate('/interventions')
                         }
                         title="Retour"
                     >
@@ -461,1018 +589,1448 @@ const InterventionDetail = () => {
 
                     <div>
 
-                        <div className="page-kicker">
-                            DÉTAIL DE L'INTERVENTION
+                        <div className="page-breadcrumbs">
+                            <span>
+                                Interventions
+                            </span>
+
+                            <ChevronRight size={12} />
+
+                            <span>
+                                Détail
+                            </span>
                         </div>
 
                         <h1>
-                            Intervention #{intervention.id}
+                            Intervention #
+                            {intervention.id}
                         </h1>
 
                         <div className="header-status">
-
                             <span
-                                className={`status-badge ${statusInfo.className}`}
+                                className={`status-badge ${statusClass}`}
                             >
-                                {statusInfo.icon}
-                                {statusInfo.label}
+                                {statusLabel}
                             </span>
-
                         </div>
 
                     </div>
-
                 </div>
 
                 <div className="header-actions">
 
-                    {/* =================================================
-                        BOUTON DÉMARRER
-                    ================================================== */}
-
                     {canStart && (
-
                         <button
-                            className="btn-start"
+                            type="button"
+                            className="btn-success-action"
                             onClick={handleStart}
                             disabled={starting}
                         >
-
                             {starting ? (
-
                                 <>
                                     <RefreshCw
-                                        size={17}
+                                        size={16}
                                         className="spin"
                                     />
 
                                     Démarrage...
                                 </>
-
                             ) : (
-
                                 <>
-                                    <Play size={17} />
+                                    <Activity
+                                        size={16}
+                                    />
 
                                     Démarrer
                                 </>
-
                             )}
-
                         </button>
-
                     )}
 
-                    {/* =================================================
-                        BOUTON MODIFIER
-                    ================================================== */}
-
-                    {isEditable && (
-
+                    {canEdit && (
                         <button
+                            type="button"
                             className="btn-edit"
-                            onClick={handleEdit}
-                            disabled={starting}
+                            onClick={() =>
+                                navigate(
+                                    `/interventions/${intervention.id}/edit`
+                                )
+                            }
                         >
-                            <Edit3 size={17} />
+                            <Edit3 size={16} />
+
                             Modifier
                         </button>
-
                     )}
 
-                    {/* =================================================
-                        BOUTON ACTUALISER
-                    ================================================== */}
-
                     <button
+                        type="button"
                         className="btn-refresh"
-                        onClick={fetchIntervention}
-                        disabled={starting}
+                        onClick={() =>
+                            fetchIntervention(false)
+                        }
+                        disabled={refreshing}
+                        title="Actualiser"
                     >
-                        <RefreshCw size={17} />
-                        Actualiser
+                        <RefreshCw
+                            size={17}
+                            className={
+                                refreshing
+                                    ? 'spin'
+                                    : ''
+                            }
+                        />
                     </button>
 
                 </div>
-
             </div>
 
-            {/* =====================================================
-                RÉSUMÉ RAPIDE
+            {/* ======================================================
+                SUMMARY BAR
             ====================================================== */}
 
-            <div className="detail-summary">
+            <div className="detail-summary-bar">
 
-                <div className="summary-item">
+                <div className="summary-pill">
 
-                    <div className="summary-icon">
+                    <div className="pill-icon">
                         <Wrench size={20} />
                     </div>
 
                     <div>
-
                         <span>
                             Équipement
                         </span>
 
                         <strong>
-                            {intervention.equipment?.name ||
-                                'Non renseigné'}
+                            {equipment?.name ||
+                                equipment?.designation ||
+                                '—'}
                         </strong>
-
                     </div>
 
                 </div>
 
-                <div className="summary-item">
+                <div className="summary-divider" />
 
-                    <div className="summary-icon">
-                        <CalendarDays size={20} />
-                    </div>
+                <div className="summary-pill">
 
-                    <div>
-
-                        <span>
-                            Date planifiée
-                        </span>
-
-                        <strong>
-                            {intervention.scheduled_date ||
-                                '-'}
-                        </strong>
-
-                    </div>
-
-                </div>
-
-                <div className="summary-item">
-
-                    <div className="summary-icon">
-                        <Clock3 size={20} />
-                    </div>
-
-                    <div>
-
-                        <span>
-                            Heure
-                        </span>
-
-                        <strong>
-                            {intervention.scheduled_time ||
-                                '-'}
-                        </strong>
-
-                    </div>
-
-                </div>
-
-                <div className="summary-item">
-
-                    <div className="summary-icon">
+                    <div className="pill-icon">
                         <Users size={20} />
                     </div>
 
                     <div>
-
                         <span>
                             Groupe
                         </span>
 
                         <strong>
-                            {intervention.group?.name ||
-                                'Non affecté'}
+                            {group?.name ||
+                                group?.nom ||
+                                '—'}
                         </strong>
-
                     </div>
 
                 </div>
 
-            </div>
+                <div className="summary-divider" />
 
-            {/* =====================================================
-                INFORMATIONS PRINCIPALES
-            ====================================================== */}
+                <div className="summary-pill">
 
-            <div className="detail-grid">
-
-                {/* Équipement */}
-
-                <div className="detail-card">
-
-                    <div className="card-title">
-
-                        <div className="card-icon">
-                            <Wrench size={18} />
-                        </div>
-
-                        <h3>
-                            Équipement
-                        </h3>
-
+                    <div className="pill-icon">
+                        <CalendarDays size={20} />
                     </div>
-
-                    <div className="card-content">
-
-                        <p className="equipment-name">
-                            {intervention.equipment?.name ||
-                                'N/A'}
-                        </p>
-
-                        <span className="equipment-type">
-                            {intervention.equipment?.type ||
-                                'Type non renseigné'}
-                        </span>
-
-                    </div>
-
-                </div>
-
-                {/* Type & priorité */}
-
-                <div className="detail-card">
-
-                    <div className="card-title">
-
-                        <div className="card-icon">
-                            <ClipboardList size={18} />
-                        </div>
-
-                        <h3>
-                            Type & priorité
-                        </h3>
-
-                    </div>
-
-                    <div className="info-list">
-
-                        <div className="info-row">
-
-                            <span>
-                                Type
-                            </span>
-
-                            <strong>
-                                {intervention.type ||
-                                    '-'}
-                            </strong>
-
-                        </div>
-
-                        <div className="info-row">
-
-                            <span>
-                                Priorité
-                            </span>
-
-                            <strong>
-                                {intervention.priority ||
-                                    '-'}
-                            </strong>
-
-                        </div>
-
-                    </div>
-
-                </div>
-
-                {/* Planification */}
-
-                <div className="detail-card">
-
-                    <div className="card-title">
-
-                        <div className="card-icon">
-                            <CalendarDays size={18} />
-                        </div>
-
-                        <h3>
-                            Planification
-                        </h3>
-
-                    </div>
-
-                    <div className="info-list">
-
-                        <div className="info-row">
-
-                            <span>
-                                Date
-                            </span>
-
-                            <strong>
-                                {intervention.scheduled_date ||
-                                    '-'}
-                            </strong>
-
-                        </div>
-
-                        <div className="info-row">
-
-                            <span>
-                                Heure
-                            </span>
-
-                            <strong>
-                                {intervention.scheduled_time ||
-                                    '-'}
-                            </strong>
-
-                        </div>
-
-                        <div className="info-row">
-
-                            <span>
-                                Durée
-                            </span>
-
-                            <strong>
-                                {intervention.duration
-                                    ? `${intervention.duration} min`
-                                    : '-'}
-                            </strong>
-
-                        </div>
-
-                        {intervention.deadline && (
-
-                            <div className="info-row">
-
-                                <span>
-                                    Délai
-                                </span>
-
-                                <strong>
-                                    {intervention.deadline}
-                                </strong>
-
-                            </div>
-
-                        )}
-
-                    </div>
-
-                </div>
-
-                {/* Affectation */}
-
-                <div className="detail-card">
-
-                    <div className="card-title">
-
-                        <div className="card-icon">
-                            <Users size={18} />
-                        </div>
-
-                        <h3>
-                            Affectation
-                        </h3>
-
-                    </div>
-
-                    <div className="info-list">
-
-                        <div className="info-row">
-
-                            <span>
-                                Groupe
-                            </span>
-
-                            <strong>
-                                {intervention.group?.name ||
-                                    'Non affecté'}
-                            </strong>
-
-                        </div>
-
-                        <div className="info-row">
-
-                            <span>
-                                Intervenant
-                            </span>
-
-                            <strong>
-                                {intervention.user?.name ||
-                                    'Non affecté'}
-                            </strong>
-
-                        </div>
-
-                    </div>
-
-                </div>
-
-                {/* Statut */}
-
-                <div className="detail-card status-card">
-
-                    <div className="card-title">
-
-                        <div className="card-icon">
-                            <ClipboardList size={18} />
-                        </div>
-
-                        <h3>
-                            État de l'intervention
-                        </h3>
-
-                    </div>
-
-                    <div className="status-display">
-
-                        <span
-                            className={`status-badge large ${statusInfo.className}`}
-                        >
-                            {statusInfo.icon}
-                            {statusInfo.label}
-                        </span>
-
-                        <p>
-
-                            {intervention.status ===
-                                'en_attente' &&
-                                "L’intervention est planifiée et attend son exécution."}
-
-                            {intervention.status ===
-                                'en_cours' &&
-                                "L’intervention est actuellement en cours d’exécution."}
-
-                            {intervention.status ===
-                                'terminee' &&
-                                "L’intervention est terminée et attend la validation du responsable."}
-
-                            {intervention.status ===
-                                'validee' &&
-                                "L’intervention a été validée et clôturée."}
-
-                            {intervention.status ===
-                                'en_retard' &&
-                                "Cette intervention a dépassé le délai prévu."}
-
-                        </p>
-
-                    </div>
-
-                </div>
-
-            </div>
-
-            {/* =====================================================
-                DESCRIPTION
-            ====================================================== */}
-
-            {intervention.description && (
-
-                <div className="detail-section">
-
-                    <div className="section-header">
-
-                        <div>
-
-                            <span className="section-kicker">
-                                INFORMATIONS
-                            </span>
-
-                            <h2>
-                                Description
-                            </h2>
-
-                        </div>
-
-                    </div>
-
-                    <div className="description-box">
-
-                        <p>
-                            {intervention.description}
-                        </p>
-
-                    </div>
-
-                </div>
-
-            )}
-
-            {/* =====================================================
-                RELEVÉ AFFECTÉ
-            ====================================================== */}
-
-            <div className="detail-section">
-
-                <div className="section-header">
 
                     <div>
-
-                        <span className="section-kicker">
-                            RELEVÉ
+                        <span>
+                            Date prévue
                         </span>
 
-                        <h2>
-                            Relevé affecté à l'intervention
-                        </h2>
-
+                        <strong>
+                            {formatDate(
+                                intervention.scheduled_date
+                            )}
+                        </strong>
                     </div>
-
-                    <ClipboardList size={22} />
 
                 </div>
 
-                {assignedCanvas ? (
+                <div className="summary-divider" />
 
-                    <div className="assigned-reading">
+                <div className="summary-pill">
 
-                        {/* Nom */}
+                    <div className="pill-icon">
+                        <Clock3 size={20} />
+                    </div>
 
-                        <div className="info-row">
+                    <div>
+                        <span>
+                            Heure
+                        </span>
 
-                            <span>
-                                Nom du relevé
-                            </span>
+                        <strong>
+                            {formatTime(
+                                intervention.scheduled_time
+                            )}
+                        </strong>
+                    </div>
 
-                            <strong>
-                                {assignedCanvas.template_name ||
-                                    'Sans nom'}
-                            </strong>
+                </div>
+
+            </div>
+
+            {/* ======================================================
+                NAVIGATION
+            ====================================================== */}
+
+            <div className="navigation-tabs">
+
+                <button
+                    type="button"
+                    className={
+                        `tab-btn ${
+                            activeTab === 'details'
+                                ? 'active'
+                                : ''
+                        }`
+                    }
+                    onClick={() =>
+                        setActiveTab('details')
+                    }
+                >
+                    <FileText size={17} />
+
+                    Détails
+                </button>
+
+                <button
+                    type="button"
+                    className={
+                        `tab-btn ${
+                            activeTab === 'readings'
+                                ? 'active'
+                                : ''
+                        }`
+                    }
+                    onClick={() =>
+                        setActiveTab('readings')
+                    }
+                >
+                    <ClipboardList size={17} />
+
+                    Relevés
+
+                    {readingCount > 0 && (
+                        <span>
+                            ({readingCount})
+                        </span>
+                    )}
+                </button>
+
+            </div>
+
+            {/* ======================================================
+                TAB : DÉTAILS
+            ====================================================== */}
+
+            {activeTab === 'details' && (
+
+                <div className="tab-content-grid">
+
+                    {/* ------------------------------------------------
+                        INFORMATIONS PRINCIPALES
+                    ------------------------------------------------ */}
+
+                    <div className="detail-grid-compact">
+
+                        <section className="detail-card-section">
+
+                            <div className="card-section-header">
+
+                                <div className="card-section-title">
+                                    <Wrench size={18} />
+
+                                    <h3>
+                                        Équipement
+                                    </h3>
+                                </div>
+
+                            </div>
+
+                            <div className="card-section-body">
+
+                                <div className="info-grid">
+
+                                    <div className="info-item">
+                                        <span className="info-label">
+                                            Désignation
+                                        </span>
+
+                                        <span className="info-value">
+                                            {equipment?.name ||
+                                                equipment?.designation ||
+                                                '—'}
+                                        </span>
+                                    </div>
+
+                                    <div className="info-item">
+                                        <span className="info-label">
+                                            Référence
+                                        </span>
+
+                                        <span className="info-value">
+                                            {equipment?.reference ||
+                                                equipment?.code ||
+                                                equipment?.serial_number ||
+                                                '—'}
+                                        </span>
+                                    </div>
+
+                                    <div className="info-item">
+                                        <span className="info-label">
+                                            Type
+                                        </span>
+
+                                        <span className="info-value">
+                                            {equipment?.type ||
+                                                equipment?.category ||
+                                                '—'}
+                                        </span>
+                                    </div>
+
+                                    <div className="info-item">
+                                        <span className="info-label">
+                                            Localisation
+                                        </span>
+
+                                        <span className="info-value">
+                                            {equipment?.location ||
+                                                equipment?.localisation ||
+                                                '—'}
+                                        </span>
+                                    </div>
+
+                                </div>
+
+                            </div>
+
+                        </section>
+
+                        {/* ------------------------------------------------
+                            PLANIFICATION
+                        ------------------------------------------------ */}
+
+                        <section className="detail-card-section">
+
+                            <div className="card-section-header">
+
+                                <div className="card-section-title">
+                                    <CalendarDays size={18} />
+
+                                    <h3>
+                                        Planification
+                                    </h3>
+                                </div>
+
+                            </div>
+
+                            <div className="card-section-body">
+
+                                <div className="info-grid">
+
+                                    <div className="info-item">
+                                        <span className="info-label">
+                                            Date
+                                        </span>
+
+                                        <span className="info-value">
+                                            {formatDate(
+                                                intervention.scheduled_date
+                                            )}
+                                        </span>
+                                    </div>
+
+                                    <div className="info-item">
+                                        <span className="info-label">
+                                            Heure
+                                        </span>
+
+                                        <span className="info-value">
+                                            {formatTime(
+                                                intervention.scheduled_time
+                                            )}
+                                        </span>
+                                    </div>
+
+                                    <div className="info-item">
+                                        <span className="info-label">
+                                            Durée
+                                        </span>
+
+                                        <span className="info-value">
+                                            {intervention.duration
+                                                ? `${intervention.duration} min`
+                                                : '—'}
+                                        </span>
+                                    </div>
+
+                                    <div className="info-item">
+                                        <span className="info-label">
+                                            Priorité
+                                        </span>
+
+                                        <span
+                                            className={`info-value priority-tag ${priorityClass}`}
+                                        >
+                                            {getPriorityLabel(
+                                                intervention.priority
+                                            )}
+                                        </span>
+                                    </div>
+
+                                </div>
+
+                            </div>
+
+                        </section>
+
+                    </div>
+
+                    {/* ------------------------------------------------
+                        AFFECTATION
+                    ------------------------------------------------ */}
+
+                    <section className="detail-card-section">
+
+                        <div className="card-section-header">
+
+                            <div className="card-section-title">
+                                <Users size={18} />
+
+                                <h3>
+                                    Affectation
+                                </h3>
+                            </div>
 
                         </div>
 
-                        {/* Type */}
+                        <div className="card-section-body">
 
-                        <div className="info-row">
+                            <div className="info-grid">
 
-                            <span>
-                                Type
-                            </span>
+                                <div className="info-item">
 
-                            <strong>
-                                {assignedCanvas.template_type ||
-                                    '-'}
-                            </strong>
+                                    <span className="info-label">
+                                        Groupe responsable
+                                    </span>
+
+                                    <span className="info-value">
+                                        {group?.name ||
+                                            group?.nom ||
+                                            '—'}
+                                    </span>
+
+                                </div>
+
+                                <div className="info-item">
+
+                                    <span className="info-label">
+                                        Intervenant
+                                    </span>
+
+                                    <span className="info-value">
+                                        {user?.name ||
+                                            user?.full_name ||
+                                            'Non affecté'}
+                                    </span>
+
+                                </div>
+
+                                <div className="info-item">
+
+                                    <span className="info-label">
+                                        Type
+                                    </span>
+
+                                    <span className="info-value">
+                                        {intervention.type ||
+                                            '—'}
+                                    </span>
+
+                                </div>
+
+                                <div className="info-item">
+
+                                    <span className="info-label">
+                                        Créée par
+                                    </span>
+
+                                    <span className="info-value">
+                                        {intervention.created_by_user?.name ||
+                                            intervention.createdBy?.name ||
+                                            '—'}
+                                    </span>
+
+                                </div>
+
+                            </div>
 
                         </div>
 
-                        {/* Fréquence */}
+                    </section>
 
-                        <div className="info-row">
+                    {/* ------------------------------------------------
+                        MODÈLE DE RELEVÉ
+                    ------------------------------------------------ */}
 
-                            <span>
-                                Fréquence
-                            </span>
+                    <section className="detail-card-section">
 
-                            <strong>
-                                {assignedCanvas.frequency ||
-                                    '-'}
-                            </strong>
+                        <div className="card-section-header">
 
-                        </div>
+                            <div className="card-section-title">
+                                <ClipboardList size={18} />
 
-                        {/* Équipement */}
-
-                        <div className="info-row">
-
-                            <span>
-                                Équipement
-                            </span>
-
-                            <strong>
-                                {assignedCanvas.equipment?.name ||
-                                    intervention.equipment?.name ||
-                                    '-'}
-                            </strong>
+                                <h3>
+                                    Modèle de relevé
+                                </h3>
+                            </div>
 
                         </div>
 
-                        {/* Paramètres */}
+                        {assignedTemplate ? (
 
-                        {Array.isArray(
-                            assignedCanvas.parameters
-                        ) &&
-                        assignedCanvas.parameters.length > 0 && (
+                            <div className="reading-banner">
 
-                            <div className="reading-parameters">
+                                <div className="reading-banner-left">
 
-                                <strong>
-                                    Paramètres à relever :
-                                </strong>
+                                    <div className="reading-banner-icon">
+                                        <Gauge size={22} />
+                                    </div>
 
-                                <ul>
+                                    <div className="reading-banner-details">
 
-                                    {assignedCanvas.parameters.map(
-                                        (parameter, index) => (
+                                        <div className="reading-banner-title">
 
-                                            <li key={index}>
+                                            <h3>
+                                                {assignedTemplate.name ||
+                                                    assignedTemplate.title ||
+                                                    assignedTemplate.designation ||
+                                                    'Modèle de relevé'}
+                                            </h3>
 
-                                                {typeof parameter ===
-                                                'string'
-                                                    ? parameter
-                                                    : parameter?.name ||
-                                                      parameter?.label ||
-                                                      parameter?.parameter ||
-                                                      JSON.stringify(
-                                                          parameter
-                                                      )}
+                                            {assignedTemplate.type && (
+                                                <span className="reading-badge-type">
+                                                    {assignedTemplate.type}
+                                                </span>
+                                            )}
 
-                                            </li>
+                                        </div>
 
-                                        )
+                                        <div className="reading-banner-sub">
+
+                                            <Hash size={14} />
+
+                                            <span>
+                                                {assignedTemplate.id
+                                                    ? `Modèle #${assignedTemplate.id}`
+                                                    : 'Modèle associé'}
+                                            </span>
+
+                                        </div>
+
+                                    </div>
+
+                                </div>
+
+                                <div className="reading-banner-actions">
+
+                                    {intervention.reading_pdf_path && (
+                                        <button
+                                            type="button"
+                                            className="btn-open-reading"
+                                            onClick={
+                                                downloadPdf
+                                            }
+                                        >
+                                            <Download
+                                                size={16}
+                                            />
+
+                                            PDF
+                                        </button>
                                     )}
 
-                                </ul>
+                                </div>
+
+                            </div>
+
+                        ) : (
+
+                            <div className="no-assigned-reading">
+
+                                <AlertCircle size={18} />
+
+                                <span>
+                                    Aucun modèle de relevé
+                                    n’est associé à cette
+                                    intervention.
+                                </span>
 
                             </div>
 
                         )}
 
-                        {/* Header du relevé */}
+                    </section>
 
-                        {assignedCanvas.header &&
-                        typeof assignedCanvas.header ===
-                            'object' && (
+                    {/* ------------------------------------------------
+                        DESCRIPTION
+                    ------------------------------------------------ */}
 
-                            <div className="reading-header-info">
+                    <section className="detail-section">
 
-                                <strong>
-                                    Informations du relevé :
-                                </strong>
+                        <div className="section-header">
 
-                                <pre>
-                                    {JSON.stringify(
-                                        assignedCanvas.header,
-                                        null,
-                                        2
-                                    )}
-                                </pre>
+                            <div>
+
+                                <span className="section-kicker">
+                                    INTERVENTION
+                                </span>
+
+                                <h2>
+                                    Description
+                                </h2>
 
                             </div>
 
-                        )}
+                        </div>
 
-                        {/* PDF */}
+                        <div className="description-content">
 
-                        {(intervention.reading_pdf_path ||
-                            assignedCanvas.reading_pdf_path) && (
+                            <p>
+                                {intervention.description ||
+                                    'Aucune description fournie pour cette intervention.'}
+                            </p>
 
-                            <div className="pdf-card">
+                        </div>
 
-                                <div className="pdf-info">
+                    </section>
 
-                                    <FileText size={24} />
+                    {/* ------------------------------------------------
+                        DIAGNOSTIC
+                    ------------------------------------------------ */}
 
-                                    <div>
+                    {(intervention.diagnostic ||
+                        intervention.actions ||
+                        intervention.observations) && (
 
-                                        <strong>
-                                            Document de relevé
-                                        </strong>
+                        <section className="detail-section">
 
-                                        <span>
-                                            Document associé à cette intervention
+                            <div className="section-header">
+
+                                <div>
+
+                                    <span className="section-kicker">
+                                        COMPTE RENDU
+                                    </span>
+
+                                    <h2>
+                                        Informations de réalisation
+                                    </h2>
+
+                                </div>
+
+                            </div>
+
+                            <div className="card-section-body">
+
+                                <div className="info-grid">
+
+                                    <div className="info-item">
+
+                                        <span className="info-label">
+                                            Diagnostic
+                                        </span>
+
+                                        <span className="info-value">
+                                            {intervention.diagnostic ||
+                                                '—'}
+                                        </span>
+
+                                    </div>
+
+                                    <div className="info-item">
+
+                                        <span className="info-label">
+                                            Actions réalisées
+                                        </span>
+
+                                        <span className="info-value">
+                                            {intervention.actions ||
+                                                '—'}
+                                        </span>
+
+                                    </div>
+
+                                    <div className="info-item">
+
+                                        <span className="info-label">
+                                            Observations
+                                        </span>
+
+                                        <span className="info-value">
+                                            {intervention.observations ||
+                                                '—'}
+                                        </span>
+
+                                    </div>
+
+                                    <div className="info-item">
+
+                                        <span className="info-label">
+                                            Pièces utilisées
+                                        </span>
+
+                                        <span className="info-value">
+                                            {intervention.parts_used
+                                                ? (
+                                                    Array.isArray(
+                                                        intervention.parts_used
+                                                    )
+                                                        ? intervention.parts_used.join(
+                                                              ', '
+                                                          )
+                                                        : String(
+                                                              intervention.parts_used
+                                                          )
+                                                )
+                                                : 'Aucune'}
                                         </span>
 
                                     </div>
 
                                 </div>
 
-                                <div className="pdf-actions">
+                            </div>
 
-                                    <button
-                                        onClick={downloadPdf}
-                                        className="btn-secondary"
-                                    >
-                                        <Download size={16} />
-                                        Télécharger
-                                    </button>
+                        </section>
 
-                                    <a
-                                        href={
-                                            intervention.reading_pdf_path ||
-                                            assignedCanvas.reading_pdf_path
-                                        }
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="btn-secondary"
-                                    >
-                                        <FileText size={16} />
-                                        Consulter
-                                    </a>
+                    )}
 
+                    {/* ------------------------------------------------
+                        INFORMATIONS SYSTÈME
+                    ------------------------------------------------ */}
+
+                    <section className="detail-card-section">
+
+                        <div className="card-section-header">
+
+                            <div className="card-section-title">
+                                <Hash size={18} />
+
+                                <h3>
+                                    Informations système
+                                </h3>
+                            </div>
+
+                        </div>
+
+                        <div className="card-section-body">
+
+                            <div className="info-grid">
+
+                                <div className="info-item">
+                                    <span className="info-label">
+                                        Identifiant
+                                    </span>
+
+                                    <span className="info-value">
+                                        #{intervention.id}
+                                    </span>
+                                </div>
+
+                                <div className="info-item">
+                                    <span className="info-label">
+                                        Créée le
+                                    </span>
+
+                                    <span className="info-value">
+                                        {formatDateTime(
+                                            intervention.created_at
+                                        )}
+                                    </span>
+                                </div>
+
+                                <div className="info-item">
+                                    <span className="info-label">
+                                        Démarrée le
+                                    </span>
+
+                                    <span className="info-value">
+                                        {formatDateTime(
+                                            intervention.started_at
+                                        )}
+                                    </span>
+                                </div>
+
+                                <div className="info-item">
+                                    <span className="info-label">
+                                        Terminée le
+                                    </span>
+
+                                    <span className="info-value">
+                                        {formatDateTime(
+                                            intervention.completed_at
+                                        )}
+                                    </span>
                                 </div>
 
                             </div>
 
-                        )}
+                        </div>
 
-                    </div>
-
-                ) : (
-
-                    <div className="no-readings">
-
-                        <ClipboardList size={32} />
-
-                        <strong>
-                            Aucun relevé affecté
-                        </strong>
-
-                        <p>
-                            Aucun relevé n'est associé à cette intervention.
-                        </p>
-
-                        <small>
-                            template_id :
-                            {' '}
-                            {intervention.template_id ||
-                                'null'}
-                        </small>
-
-                    </div>
-
-                )}
-
-            </div>
-
-            {/* =====================================================
-                RELEVÉS / MESURES SAISIS
-            ====================================================== */}
-
-            <div className="detail-section">
-
-                <div className="section-header">
-
-                    <div>
-
-                        <span className="section-kicker">
-                            MESURES
-                        </span>
-
-                        <h2>
-                            Relevés de l'intervention
-                        </h2>
-
-                    </div>
-
-                    <span className="reading-count">
-
-                        {readings.length}
-
-                        {' '}
-
-                        relevé
-                        {readings.length > 1
-                            ? 's'
-                            : ''}
-
-                    </span>
+                    </section>
 
                 </div>
+            )}
 
-                {readings.length > 0 ? (
+            {/* ======================================================
+                TAB : RELEVÉS
+            ====================================================== */}
 
-                    <div className="readings-table-wrapper">
+            {activeTab === 'readings' && (
 
-                        <table className="readings-table">
+                <div className="tab-content-stack">
 
-                            <thead>
+                    <section className="detail-card-section">
 
-                                <tr>
+                        <div className="card-section-header">
 
-                                    <th>
-                                        Paramètre
-                                    </th>
+                            <div className="card-section-title">
 
-                                    <th>
-                                        Valeur attendue
-                                    </th>
+                                <ClipboardList size={18} />
 
-                                    <th>
-                                        Valeur mesurée
-                                    </th>
+                                <h3>
+                                    Historique des relevés
+                                </h3>
 
-                                    <th>
-                                        Statut
-                                    </th>
+                            </div>
 
-                                    <th>
-                                        Commentaire
-                                    </th>
+                            <span className="reading-badge-type">
+                                {readingCount}{' '}
+                                relevé
+                                {readingCount > 1
+                                    ? 's'
+                                    : ''}
+                            </span>
 
-                                </tr>
+                        </div>
 
-                            </thead>
+                        {readings.length > 0 ? (
 
-                            <tbody>
+                            <div className="reading-history">
 
                                 {readings.map(
-                                    (reading, index) => (
+                                    (reading, index) => {
 
-                                        <tr
-                                            key={
-                                                reading.id ||
-                                                index
-                                            }
-                                        >
+                                        const readingStatus =
+                                            reading.validation_status ||
+                                            reading.status ||
+                                            'brouillon';
 
-                                            <td>
+                                        return (
+                                            <div
+                                                key={
+                                                    reading.id ||
+                                                    index
+                                                }
+                                                className="reading-history-item clickable"
+                                                onClick={() =>
+                                                    openReading(
+                                                        reading
+                                                    )
+                                                }
+                                                role="button"
+                                                tabIndex={0}
+                                                onKeyDown={(
+                                                    event
+                                                ) => {
+                                                    if (
+                                                        event.key ===
+                                                        'Enter'
+                                                    ) {
+                                                        openReading(
+                                                            reading
+                                                        );
+                                                    }
+                                                }}
+                                            >
 
-                                                <strong>
-                                                    {reading.parameter ||
-                                                        '-'}
-                                                </strong>
+                                                <div className="reading-history-main">
 
-                                            </td>
+                                                    <div className="reading-history-icon">
+                                                        <ClipboardList
+                                                            size={
+                                                                18
+                                                            }
+                                                        />
+                                                    </div>
 
-                                            <td>
-                                                {reading.expected_value ||
-                                                    '-'}
-                                            </td>
+                                                    <div>
 
-                                            <td>
-                                                {reading.measured_value ||
-                                                    '-'}
-                                            </td>
+                                                        <strong>
+                                                            Relevé #
+                                                            {reading.id ||
+                                                                index +
+                                                                    1}
+                                                        </strong>
 
-                                            <td>
+                                                        <span className="history-date">
+                                                            {formatDateTime(
+                                                                reading.taken_at ||
+                                                                    reading.created_at
+                                                            )}
+                                                        </span>
 
-                                                <span
-                                                    className={`reading-status ${reading.status || ''}`}
-                                                >
-
-                                                    {reading.status ===
-                                                        'normal' &&
-                                                        '✓ Normal'}
-
-                                                    {reading.status ===
-                                                        'attention' &&
-                                                        '⚠ Attention'}
-
-                                                    {reading.status ===
-                                                        'alerte' &&
-                                                        '● Alerte'}
-
-                                                    {![
-                                                        'normal',
-                                                        'attention',
-                                                        'alerte'
-                                                    ].includes(
-                                                        reading.status
-                                                    ) &&
-                                                        (
-                                                            reading.status ||
-                                                            '-'
+                                                        {reading.commentaire && (
+                                                            <p className="history-comment">
+                                                                {
+                                                                    reading.commentaire
+                                                                }
+                                                            </p>
                                                         )}
 
-                                                </span>
+                                                        {reading.comment && (
+                                                            <p className="history-comment">
+                                                                {
+                                                                    reading.comment
+                                                                }
+                                                            </p>
+                                                        )}
 
-                                            </td>
+                                                    </div>
 
-                                            <td>
+                                                </div>
 
-                                                {reading.comment ||
-                                                    '-'}
+                                                <div className="reading-history-right">
 
-                                            </td>
+                                                    <span
+                                                        className={`status-badge ${getReadingStatusClass(
+                                                            readingStatus
+                                                        )}`}
+                                                    >
+                                                        {getReadingStatusLabel(
+                                                            readingStatus
+                                                        )}
+                                                    </span>
 
-                                        </tr>
+                                                    <button
+                                                        type="button"
+                                                        className="btn-open-reading-icon"
+                                                        onClick={(
+                                                            event
+                                                        ) => {
+                                                            event.stopPropagation();
+                                                            openReading(
+                                                                reading
+                                                            );
+                                                        }}
+                                                        title="Consulter"
+                                                    >
+                                                        <Eye
+                                                            size={
+                                                                17
+                                                            }
+                                                        />
+                                                    </button>
 
-                                    )
+                                                </div>
+
+                                            </div>
+                                        );
+                                    }
                                 )}
-
-                            </tbody>
-
-                        </table>
-
-                    </div>
-
-                ) : (
-
-                    <div className="no-readings">
-
-                        <ClipboardList size={32} />
-
-                        <strong>
-                            Aucun relevé disponible
-                        </strong>
-
-                        <p>
-                            Aucune mesure n'a encore été
-                            enregistrée pour cette intervention.
-                        </p>
-
-                        {assignedCanvas && (
-
-                            <small>
-
-                                Le relevé «{' '}
-
-                                {assignedCanvas.template_name ||
-                                    'Sans nom'}
-
-                                {' '}» est bien affecté.
-
-                                Les mesures apparaîtront ici
-                                après leur saisie.
-
-                            </small>
-
-                        )}
-
-                    </div>
-
-                )}
-
-            </div>
-
-            {/* =====================================================
-                INFORMATIONS SYSTÈME
-            ====================================================== */}
-
-            <div className="detail-section">
-
-                <div className="section-header">
-
-                    <div>
-
-                        <span className="section-kicker">
-                            SYSTÈME
-                        </span>
-
-                        <h2>
-                            Informations système
-                        </h2>
-
-                    </div>
-
-                </div>
-
-                <div className="detail-grid">
-
-                    <div className="detail-card">
-
-                        <div className="info-list">
-
-                            <div className="info-row">
-
-                                <span>
-                                    Créée le
-                                </span>
-
-                                <strong>
-                                    {intervention.created_at
-                                        ? new Date(
-                                            intervention.created_at
-                                        ).toLocaleString(
-                                            'fr-FR'
-                                        )
-                                        : '-'}
-                                </strong>
 
                             </div>
 
-                            {intervention.started_at && (
+                        ) : (
 
-                                <div className="info-row">
+                            <div className="no-assigned-reading">
 
-                                    <span>
-                                        Début
-                                    </span>
+                                <ClipboardList
+                                    size={22}
+                                />
 
-                                    <strong>
-                                        {new Date(
-                                            intervention.started_at
-                                        ).toLocaleString(
-                                            'fr-FR'
-                                        )}
-                                    </strong>
+                                <span>
+                                    Aucun relevé n’a encore
+                                    été créé pour cette
+                                    intervention.
+                                </span>
+
+                            </div>
+
+                        )}
+
+                    </section>
+
+                    {/* ------------------------------------------------
+                        DERNIER RELEVÉ
+                    ------------------------------------------------ */}
+
+                    {latestReading && (
+
+                        <section className="detail-card-section">
+
+                            <div className="card-section-header">
+
+                                <div className="card-section-title">
+
+                                    <Activity size={18} />
+
+                                    <h3>
+                                        Dernier relevé
+                                    </h3>
 
                                 </div>
 
-                            )}
+                            </div>
 
-                            {intervention.completed_at && (
+                            <div className="card-section-body">
 
-                                <div className="info-row">
+                                <div className="info-grid">
 
-                                    <span>
-                                        Fin
-                                    </span>
+                                    <div className="info-item">
 
-                                    <strong>
-                                        {new Date(
-                                            intervention.completed_at
-                                        ).toLocaleString(
-                                            'fr-FR'
-                                        )}
-                                    </strong>
+                                        <span className="info-label">
+                                            Date de mesure
+                                        </span>
+
+                                        <span className="info-value">
+                                            {formatDateTime(
+                                                latestReading.taken_at ||
+                                                    latestReading.created_at
+                                            )}
+                                        </span>
+
+                                    </div>
+
+                                    <div className="info-item">
+
+                                        <span className="info-label">
+                                            Effectué par
+                                        </span>
+
+                                        <span className="info-value">
+                                            {latestReading.taken_by_user?.name ||
+                                                latestReading.takenBy?.name ||
+                                                latestReading.user?.name ||
+                                                '—'}
+                                        </span>
+
+                                    </div>
+
+                                    <div className="info-item">
+
+                                        <span className="info-label">
+                                            Validation
+                                        </span>
+
+                                        <span className="info-value">
+
+                                            <span
+                                                className={`status-badge ${getReadingStatusClass(
+                                                    latestReading.validation_status ||
+                                                        latestReading.status
+                                                )}`}
+                                            >
+                                                {getReadingStatusLabel(
+                                                    latestReading.validation_status ||
+                                                        latestReading.status
+                                                )}
+                                            </span>
+
+                                        </span>
+
+                                    </div>
 
                                 </div>
 
-                            )}
+                            </div>
+
+                        </section>
+                    )}
+
+                </div>
+            )}
+
+            {/* ======================================================
+                MODALE RELEVÉ
+            ====================================================== */}
+
+            {readingModalOpen &&
+                selectedReading && (
+
+                    <div
+                        className="reading-modal-overlay"
+                        onMouseDown={(
+                            event
+                        ) => {
+                            if (
+                                event.target ===
+                                event.currentTarget
+                            ) {
+                                closeReading();
+                            }
+                        }}
+                    >
+
+                        <div className="reading-modal">
+
+                            <div className="reading-modal-header">
+
+                                <div>
+
+                                    <span className="modal-subtitle">
+                                        CONSULTATION DU RELEVÉ
+                                    </span>
+
+                                    <h2>
+                                        Relevé #
+                                        {selectedReading.id}
+                                    </h2>
+
+                                </div>
+
+                                <button
+                                    type="button"
+                                    className="reading-modal-close"
+                                    onClick={
+                                        closeReading
+                                    }
+                                    title="Fermer"
+                                >
+                                    <X size={22} />
+                                </button>
+
+                            </div>
+
+                            <div className="reading-modal-body">
+
+                                <div className="reading-document">
+
+                                    {/* ------------------------------------------------
+                                        IDENTIFICATION
+                                    ------------------------------------------------ */}
+
+                                    <div className="document-top">
+
+                                        <div className="document-brand">
+
+                                            <strong>
+                                                GMAO CNS
+                                            </strong>
+
+                                            <span>
+                                                Fiche de relevé
+                                            </span>
+
+                                        </div>
+
+                                        <div className="document-code">
+
+                                            <span>
+                                                Intervention
+                                            </span>
+
+                                            <strong>
+                                                #
+                                                {
+                                                    intervention.id
+                                                }
+                                            </strong>
+
+                                        </div>
+
+                                    </div>
+
+                                    <div className="document-division">
+                                        SYSTÈMES CNS
+                                    </div>
+
+                                    {/* ------------------------------------------------
+                                        STATUS
+                                    ------------------------------------------------ */}
+
+                                    <div className="reading-status-banner">
+
+                                        <div className="status-banner-left">
+
+                                            <CheckCircle2
+                                                size={18}
+                                            />
+
+                                            <strong>
+                                                {getReadingStatusLabel(
+                                                    selectedReading.validation_status ||
+                                                        selectedReading.status
+                                                )}
+                                            </strong>
+
+                                        </div>
+
+                                        {selectedReading.validated_at && (
+                                            <span className="validated-at-text">
+                                                Validé le{' '}
+                                                {formatDateTime(
+                                                    selectedReading.validated_at
+                                                )}
+                                            </span>
+                                        )}
+
+                                        {(
+                                            selectedReading.commentaire ||
+                                            selectedReading.comment
+                                        ) && (
+
+                                            <div className="validation-comment-box">
+
+                                                <AlertCircle
+                                                    size={16}
+                                                />
+
+                                                <span>
+                                                    {selectedReading.commentaire ||
+                                                        selectedReading.comment}
+                                                </span>
+
+                                            </div>
+                                        )}
+
+                                    </div>
+
+                                    {/* ------------------------------------------------
+                                        IDENTIFICATION
+                                    ------------------------------------------------ */}
+
+                                    <div className="document-identification">
+
+                                        <div className="document-field">
+                                            <span>
+                                                Équipement
+                                            </span>
+
+                                            <strong>
+                                                {equipment?.name ||
+                                                    equipment?.designation ||
+                                                    '—'}
+                                            </strong>
+                                        </div>
+
+                                        <div className="document-field">
+                                            <span>
+                                                Groupe
+                                            </span>
+
+                                            <strong>
+                                                {group?.name ||
+                                                    group?.nom ||
+                                                    '—'}
+                                            </strong>
+                                        </div>
+
+                                        <div className="document-field">
+                                            <span>
+                                                Date
+                                            </span>
+
+                                            <strong>
+                                                {formatDate(
+                                                    selectedReading.taken_at ||
+                                                        selectedReading.created_at
+                                                )}
+                                            </strong>
+                                        </div>
+
+                                        <div className="document-field">
+                                            <span>
+                                                Intervenant
+                                            </span>
+
+                                            <strong>
+                                                {selectedReading.taken_by_user?.name ||
+                                                    selectedReading.takenBy?.name ||
+                                                    selectedReading.user?.name ||
+                                                    user?.name ||
+                                                    '—'}
+                                            </strong>
+                                        </div>
+
+                                    </div>
+
+                                    {/* ------------------------------------------------
+                                        VALEURS
+                                    ------------------------------------------------ */}
+
+                                    <div>
+
+                                        <div className="document-section-title">
+                                            <Gauge size={17} />
+
+                                            Valeurs relevées
+                                        </div>
+
+                                        <div className="interactive-reading-table-wrapper">
+
+                                            <table className="interactive-reading-table">
+
+                                                <thead>
+                                                    <tr>
+                                                        <th>
+                                                            Paramètre
+                                                        </th>
+
+                                                        <th>
+                                                            Valeur
+                                                        </th>
+
+                                                        <th>
+                                                            Unité
+                                                        </th>
+                                                    </tr>
+                                                </thead>
+
+                                                <tbody>
+
+                                                    {Object.entries(
+                                                        getReadingValues(
+                                                            selectedReading
+                                                        )
+                                                    ).length > 0 ? (
+
+                                                        Object.entries(
+                                                            getReadingValues(
+                                                                selectedReading
+                                                            )
+                                                        ).map(
+                                                            (
+                                                                [
+                                                                    key,
+                                                                    value,
+                                                                ]
+                                                            ) => {
+
+                                                                let displayValue =
+                                                                    value;
+
+                                                                let unit =
+                                                                    '';
+
+                                                                if (
+                                                                    value &&
+                                                                    typeof value ===
+                                                                        'object'
+                                                                ) {
+                                                                    displayValue =
+                                                                        value.value ??
+                                                                        value.valeur ??
+                                                                        value.display ??
+                                                                        '—';
+
+                                                                    unit =
+                                                                        value.unit ??
+                                                                        value.unite ??
+                                                                        '';
+                                                                }
+
+                                                                return (
+                                                                    <tr
+                                                                        key={
+                                                                            key
+                                                                        }
+                                                                    >
+                                                                        <td>
+                                                                            {
+                                                                                key
+                                                                            }
+                                                                        </td>
+
+                                                                        <td>
+                                                                            <span className="value-display-only">
+                                                                                {String(
+                                                                                    displayValue
+                                                                                )}
+                                                                            </span>
+                                                                        </td>
+
+                                                                        <td>
+                                                                            <span className="unit-tag">
+                                                                                {unit ||
+                                                                                    '—'}
+                                                                            </span>
+                                                                        </td>
+                                                                    </tr>
+                                                                );
+                                                            }
+                                                        )
+
+                                                    ) : (
+
+                                                        <tr>
+                                                            <td
+                                                                colSpan="3"
+                                                                className="text-center"
+                                                            >
+                                                                Aucune
+                                                                valeur
+                                                                enregistrée
+                                                            </td>
+                                                        </tr>
+                                                    )}
+
+                                                </tbody>
+
+                                            </table>
+
+                                        </div>
+
+                                    </div>
+
+                                    {/* ------------------------------------------------
+                                        OBSERVATION
+                                    ------------------------------------------------ */}
+
+                                    {(
+                                        selectedReading.observation ||
+                                        selectedReading.observations
+                                    ) && (
+
+                                        <div>
+
+                                            <div className="document-section-title">
+                                                <FileText
+                                                    size={17}
+                                                />
+
+                                                Observation
+                                            </div>
+
+                                            <div className="validation-comment-box">
+
+                                                {selectedReading.observation ||
+                                                    selectedReading.observations}
+
+                                            </div>
+
+                                        </div>
+                                    )}
+
+                                </div>
+
+                            </div>
 
                         </div>
 
                     </div>
-
-                </div>
-
-            </div>
+                )}
 
         </div>
     );
