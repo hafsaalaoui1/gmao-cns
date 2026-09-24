@@ -61,7 +61,7 @@ const Sidebar = () => {
             { label: 'Équipements', path: '/equipments', icon: Wrench },
             { label: 'Tickets', path: '/tickets', icon: Ticket },
             { label: 'Interventions', path: '/my-interventions', icon: ClipboardCheck },
-            { label: 'Stock', path: '/parts', icon: Package }
+            
           ]
         },
         {

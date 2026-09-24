@@ -7,6 +7,7 @@ use App\Models\Intervention;
 use App\Models\Reading;
 use App\Models\Notification;
 use App\Models\Ticket;
+use App\Models\PlanningException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -29,17 +30,6 @@ class InterventionController extends Controller
         |--------------------------------------------------------------------------
         | 0. GESTION AUTOMATIQUE DU RETARD
         |--------------------------------------------------------------------------
-        |
-        | Si l'intervention est encore "en_attente" et que sa date/heure
-        | prévue est atteinte ou dépassée, on la passe automatiquement
-        | à "en_retard".
-        |
-        | IMPORTANT :
-        | - en_cours       → ne change pas
-        | - terminee       → ne change pas
-        | - validee        → ne change pas
-        | - en_retard      → ne change pas
-        |
         */
 
         if (
@@ -720,22 +710,89 @@ class InterventionController extends Controller
     |--------------------------------------------------------------------------
     | SUPPRIMER UNE INTERVENTION
     |--------------------------------------------------------------------------
+    |
+    | IMPORTANT :
+    |
+    | Si l'intervention provient d'une PlanningTemplate récurrente,
+    | on crée une PlanningException pour cette date uniquement.
+    |
+    | Cela empêche InterventionGenerator de recréer cette occurrence.
+    |
     */
 
     public function destroy($id)
-    {
-        $intervention =
-            Intervention::findOrFail($id);
+{
+    $intervention = Intervention::findOrFail($id);
 
+    // On mémorise les informations avant suppression
+    $planningTemplateId = $intervention->planning_template_id;
+    $scheduledDate = $intervention->getScheduledDateRaw();
+
+    DB::beginTransaction();
+
+    try {
+        /*
+         * Si l'intervention provient d'un PlanningTemplate,
+         * on crée une exception pour cette date uniquement.
+         *
+         * Ainsi, le générateur ne recréera pas cette occurrence
+         * lors d'une prochaine génération.
+         */
+        if (
+            !empty($planningTemplateId) &&
+            !empty($scheduledDate)
+        ) {
+            PlanningException::updateOrCreate(
+                [
+                    'planning_template_id' => $planningTemplateId,
+                    'exception_date' => $scheduledDate,
+                ],
+                [
+                    'group_id_override' => null,
+                    'status_override' => 'annulee',
+                    'reason' =>
+                        'Intervention supprimée manuellement.',
+                ]
+            );
+        }
+
+        // Suppression de l'intervention
         $intervention->delete();
+
+        DB::commit();
 
         return response()->json([
             'success' => true,
             'message' =>
-                'Intervention supprimée'
+                !empty($planningTemplateId)
+                    ? 'Intervention supprimée et occurrence annulée pour cette date.'
+                    : 'Intervention supprimée'
         ]);
-    }
 
+    } catch (\Exception $e) {
+
+        DB::rollBack();
+
+        Log::error(
+            'Erreur suppression intervention : ' .
+            $e->getMessage(),
+            [
+                'intervention_id' => $id,
+                'planning_template_id' =>
+                    $planningTemplateId,
+                'scheduled_date' =>
+                    $scheduledDate,
+            ]
+        );
+
+        return response()->json([
+            'success' => false,
+            'message' =>
+                'Erreur lors de la suppression de l’intervention.',
+            'error' => $e->getMessage()
+        ], 500);
+    }
+}
     /*
     |--------------------------------------------------------------------------
     | AFFECTER UNE INTERVENTION
@@ -1900,14 +1957,6 @@ class InterventionController extends Controller
         |--------------------------------------------------------------------------
         | VÉRIFIER LE STATUT
         |--------------------------------------------------------------------------
-        |
-        | IMPORTANT :
-        | Une intervention peut maintenant être démarrée
-        | si elle est :
-        |
-        | - en_attente
-        | - en_retard
-        |
         */
 
         if (

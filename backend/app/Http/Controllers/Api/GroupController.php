@@ -11,11 +11,16 @@ use Illuminate\Support\Facades\Validator;
 class GroupController extends Controller
 {
     /**
-     * Liste des groupes
+     * ============================================================
+     * LISTE DES GROUPES
+     * ============================================================
      */
     public function index()
     {
-        $groups = Group::with('users')->get();
+        $groups = Group::with('users')
+            ->orderBy('id')
+            ->get();
+
         return response()->json([
             'data' => $groups,
             'message' => 'Liste des groupes'
@@ -23,7 +28,16 @@ class GroupController extends Controller
     }
 
     /**
-     * Créer un groupe
+     * ============================================================
+     * CRÉER UN GROUPE
+     * ============================================================
+     *
+     * Le groupe est créé normalement.
+     *
+     * La rotation est dynamique :
+     * le nouveau groupe sera automatiquement pris en compte
+     * par la rotation active lors de la prochaine génération
+     * du planning.
      */
     public function store(Request $request)
     {
@@ -35,17 +49,32 @@ class GroupController extends Controller
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 422);
+            return response()->json([
+                'errors' => $validator->errors()
+            ], 422);
         }
+
+        // --------------------------------------------------------
+        // Création du groupe
+        // --------------------------------------------------------
 
         $group = Group::create([
             'name' => $request->name,
             'description' => $request->description,
         ]);
 
-        // Associer les utilisateurs sélectionnés
-        if ($request->has('user_ids') && !empty($request->user_ids)) {
-            User::whereIn('id', $request->user_ids)->update(['group_id' => $group->id]);
+        // --------------------------------------------------------
+        // Association des utilisateurs
+        // --------------------------------------------------------
+
+        if (
+            $request->has('user_ids') &&
+            !empty($request->user_ids)
+        ) {
+            User::whereIn('id', $request->user_ids)
+                ->update([
+                    'group_id' => $group->id
+                ]);
         }
 
         return response()->json([
@@ -55,11 +84,15 @@ class GroupController extends Controller
     }
 
     /**
-     * Afficher un groupe
+     * ============================================================
+     * AFFICHER UN GROUPE
+     * ============================================================
      */
     public function show($id)
     {
-        $group = Group::with('users')->findOrFail($id);
+        $group = Group::with('users')
+            ->findOrFail($id);
+
         return response()->json([
             'data' => $group,
             'message' => 'Groupe trouvé'
@@ -67,7 +100,9 @@ class GroupController extends Controller
     }
 
     /**
-     * Mettre à jour un groupe
+     * ============================================================
+     * METTRE À JOUR UN GROUPE
+     * ============================================================
      */
     public function update(Request $request, $id)
     {
@@ -81,17 +116,43 @@ class GroupController extends Controller
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 422);
+            return response()->json([
+                'errors' => $validator->errors()
+            ], 422);
         }
 
-        $group->update($request->only(['name', 'description']));
+        // --------------------------------------------------------
+        // Mise à jour du groupe
+        // --------------------------------------------------------
 
-        // Désaffecter tous les anciens membres
-        User::where('group_id', $group->id)->update(['group_id' => null]);
+        $group->update(
+            $request->only([
+                'name',
+                'description'
+            ])
+        );
 
-        // Associer les nouveaux membres
-        if ($request->has('user_ids') && !empty($request->user_ids)) {
-            User::whereIn('id', $request->user_ids)->update(['group_id' => $group->id]);
+        // --------------------------------------------------------
+        // Désaffecter les anciens membres
+        // --------------------------------------------------------
+
+        User::where('group_id', $group->id)
+            ->update([
+                'group_id' => null
+            ]);
+
+        // --------------------------------------------------------
+        // Affecter les nouveaux membres
+        // --------------------------------------------------------
+
+        if (
+            $request->has('user_ids') &&
+            !empty($request->user_ids)
+        ) {
+            User::whereIn('id', $request->user_ids)
+                ->update([
+                    'group_id' => $group->id
+                ]);
         }
 
         return response()->json([
@@ -101,14 +162,26 @@ class GroupController extends Controller
     }
 
     /**
-     * Supprimer un groupe
+     * ============================================================
+     * SUPPRIMER UN GROUPE
+     * ============================================================
      */
     public function destroy($id)
     {
         $group = Group::findOrFail($id);
 
-        // Désaffecter les membres avant suppression
-        User::where('group_id', $group->id)->update(['group_id' => null]);
+        // --------------------------------------------------------
+        // Désaffecter les membres
+        // --------------------------------------------------------
+
+        User::where('group_id', $group->id)
+            ->update([
+                'group_id' => null
+            ]);
+
+        // --------------------------------------------------------
+        // Suppression
+        // --------------------------------------------------------
 
         $group->delete();
 
@@ -118,7 +191,9 @@ class GroupController extends Controller
     }
 
     /**
-     * Ajouter un utilisateur au groupe (utile si on veut ajouter un par un)
+     * ============================================================
+     * AJOUTER UN UTILISATEUR
+     * ============================================================
      */
     public function addUser(Request $request, $id)
     {
@@ -129,10 +204,13 @@ class GroupController extends Controller
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 422);
+            return response()->json([
+                'errors' => $validator->errors()
+            ], 422);
         }
 
         $user = User::findOrFail($request->user_id);
+
         $user->group_id = $group->id;
         $user->save();
 
@@ -142,11 +220,23 @@ class GroupController extends Controller
     }
 
     /**
-     * Retirer un utilisateur du groupe
+     * ============================================================
+     * RETIRER UN UTILISATEUR
+     * ============================================================
      */
     public function removeUser($id, $userId)
     {
+        $group = Group::findOrFail($id);
+
         $user = User::findOrFail($userId);
+
+        // Vérifier que l'utilisateur appartient bien à ce groupe
+        if ((int) $user->group_id !== (int) $group->id) {
+            return response()->json([
+                'message' => 'Cet utilisateur n’appartient pas à ce groupe.'
+            ], 422);
+        }
+
         $user->group_id = null;
         $user->save();
 

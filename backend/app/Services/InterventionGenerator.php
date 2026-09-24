@@ -6,35 +6,300 @@ use App\Models\PlanningTemplate;
 use App\Models\Intervention;
 use App\Models\GroupRotation;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class InterventionGenerator
 {
     /**
      * ============================================================
+     * GET ACTIVE ROTATION
+     * ============================================================
+     *
+     * L'application utilise une seule rotation active.
+     */
+    protected function getActiveRotation()
+    {
+        return GroupRotation::where('is_active', true)
+            ->orderBy('id')
+            ->first();
+    }
+
+    /**
+     * ============================================================
+     * GET GROUPS ORDER
+     * ============================================================
+     */
+    protected function getGroupsOrder($rotation, $startingGroupId = null)
+    {
+        $groups = [];
+
+        if ($rotation) {
+            $groups = $rotation->getEffectiveGroupsOrder();
+
+            $groups = array_values(
+                array_unique(
+                    array_map('intval', $groups)
+                )
+            );
+        }
+
+        if (empty($groups) && $startingGroupId !== null) {
+            $groups = [(int) $startingGroupId];
+        }
+
+        return $groups;
+    }
+
+    /**
+     * ============================================================
+     * GET THEORETICAL GROUP
+     * ============================================================
+     *
+     * Exemple avec :
+     *
+     * rotation = [1,3,4,5]
+     * groupe de départ = 3
+     *
+     * semaine 1 => 3
+     * semaine 2 => 4
+     * semaine 3 => 5
+     * semaine 4 => 1
+     * semaine 5 => 3
+     */
+    protected function getTheoreticalGroup(
+        PlanningTemplate $template,
+        Carbon $current,
+        array $groups
+    ) {
+        if (empty($groups)) {
+            return null;
+        }
+
+        $startingGroupId = $template->group_id
+            ? (int) $template->group_id
+            : null;
+
+        $startingGroupIndex = 0;
+
+        if ($startingGroupId !== null) {
+            $foundIndex = array_search(
+                $startingGroupId,
+                $groups,
+                true
+            );
+
+            if ($foundIndex !== false) {
+                $startingGroupIndex = $foundIndex;
+            }
+        }
+
+        $templateReferenceWeek = Carbon::parse(
+            $template->start_date
+        )->startOfWeek(Carbon::MONDAY);
+
+        $currentWeek = $current
+            ->copy()
+            ->startOfWeek(Carbon::MONDAY);
+
+        $weeksDifference = $templateReferenceWeek->diffInWeeks(
+            $currentWeek
+        );
+
+        $rotationIndex =
+            (
+                $startingGroupIndex
+                + $weeksDifference
+            )
+            % count($groups);
+
+        return (int) (
+            $groups[$rotationIndex]
+            ?? $groups[$startingGroupIndex]
+        );
+    }
+
+    /**
+     * ============================================================
+     * GET WEEKLY ASSIGNMENTS FROM DATABASE
+     * ============================================================
+     *
+     * Recharge les interventions déjà générées pour une semaine.
+     *
+     * Règles :
+     *
+     * - un équipement = un seul groupe
+     * - un groupe = un seul équipement
+     */
+    protected function getWeeklyAssignments(
+        Carbon $date,
+        array &$weeklyAssignments
+    ) {
+        $weekStart = $date
+            ->copy()
+            ->startOfWeek(Carbon::MONDAY);
+
+        $weekEnd = $date
+            ->copy()
+            ->endOfWeek(Carbon::SUNDAY);
+
+        $weekKey = $weekStart->toDateString();
+
+        if (!isset($weeklyAssignments[$weekKey])) {
+
+            $weeklyAssignments[$weekKey] = [
+                'equipment_to_group' => [],
+                'group_to_equipment' => [],
+            ];
+
+            $existingInterventions = Intervention::whereNotNull(
+                'planning_template_id'
+            )
+                ->whereBetween(
+                    'scheduled_date',
+                    [
+                        $weekStart->toDateString(),
+                        $weekEnd->toDateString(),
+                    ]
+                )
+                ->get([
+                    'equipment_id',
+                    'group_id',
+                ]);
+
+            foreach ($existingInterventions as $intervention) {
+
+                $equipmentId = (int) $intervention->equipment_id;
+                $groupId = (int) $intervention->group_id;
+
+                if ($equipmentId <= 0 || $groupId <= 0) {
+                    continue;
+                }
+
+                $weeklyAssignments[$weekKey]
+                    ['equipment_to_group']
+                    [$equipmentId] = $groupId;
+
+                $weeklyAssignments[$weekKey]
+                    ['group_to_equipment']
+                    [$groupId] = $equipmentId;
+            }
+        }
+
+        return $weekKey;
+    }
+
+    /**
+     * ============================================================
+     * FIND AVAILABLE GROUP
+     * ============================================================
+     *
+     * Essaie d'abord le groupe théorique.
+     *
+     * Si celui-ci est déjà utilisé pendant la semaine,
+     * cherche le prochain groupe libre dans la rotation.
+     */
+    protected function findAvailableGroup(
+        $desiredGroup,
+        array $groups,
+        array $weeklyData
+    ) {
+        $desiredGroup = (int) $desiredGroup;
+
+        if (
+            !isset(
+                $weeklyData['group_to_equipment'][$desiredGroup]
+            )
+        ) {
+            return $desiredGroup;
+        }
+
+        if (empty($groups)) {
+            return null;
+        }
+
+        $desiredIndex = array_search(
+            $desiredGroup,
+            $groups,
+            true
+        );
+
+        if ($desiredIndex === false) {
+            $desiredIndex = 0;
+        }
+
+        $groupCount = count($groups);
+
+        for ($offset = 1; $offset < $groupCount; $offset++) {
+
+            $candidateIndex =
+                (
+                    $desiredIndex
+                    + $offset
+                )
+                % $groupCount;
+
+            $candidateGroup =
+                (int) $groups[$candidateIndex];
+
+            if (
+                !isset(
+                    $weeklyData['group_to_equipment']
+                        [$candidateGroup]
+                )
+            ) {
+                return $candidateGroup;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * ============================================================
+     * REGISTER ASSIGNMENT
+     * ============================================================
+     */
+    protected function registerAssignment(
+        array &$weeklyAssignments,
+        $weekKey,
+        $equipmentId,
+        $groupId
+    ) {
+        $equipmentId = (int) $equipmentId;
+        $groupId = (int) $groupId;
+
+        if (!isset($weeklyAssignments[$weekKey])) {
+            $weeklyAssignments[$weekKey] = [
+                'equipment_to_group' => [],
+                'group_to_equipment' => [],
+            ];
+        }
+
+        $weeklyAssignments[$weekKey]
+            ['equipment_to_group']
+            [$equipmentId] = $groupId;
+
+        $weeklyAssignments[$weekKey]
+            ['group_to_equipment']
+            [$groupId] = $equipmentId;
+    }
+
+    /**
+     * ============================================================
      * GENERATE FOR TEMPLATE
      * ============================================================
      *
-     * Génère les interventions d'un template pour une année.
+     * Génère les interventions d'un seul template.
      *
-     * LOGIQUE DES GROUPES :
+     * IMPORTANT :
      *
-     * Le group_id du template représente le groupe choisi
-     * pour la première intervention.
+     * Cette méthode applique maintenant AUSSI la contrainte globale.
      *
-     * La rotation enregistrée dans group_rotation_id
-     * détermine l'ordre des groupes.
+     * Pour une même semaine :
      *
-     * Exemple :
-     *
-     * Rotation : A -> B -> C
-     * Groupe choisi : B
-     *
-     * Semaine 1 -> B
-     * Semaine 2 -> C
-     * Semaine 3 -> A
-     * Semaine 4 -> B
-     * Semaine 5 -> C
+     * - un groupe = maximum un équipement
+     * - un équipement = maximum un groupe
      */
     public function generateForTemplate($template, $year)
     {
@@ -50,9 +315,21 @@ class InterventionGenerator
             ? Carbon::parse($template->end_date)
             : Carbon::create($year, 12, 31);
 
-        // Limiter la génération à l'année demandée.
-        $yearStart = Carbon::create($year, 1, 1);
-        $yearEnd = Carbon::create($year, 12, 31);
+        // ============================================================
+        // LIMITES ANNÉE
+        // ============================================================
+
+        $yearStart = Carbon::create(
+            $year,
+            1,
+            1
+        )->startOfDay();
+
+        $yearEnd = Carbon::create(
+            $year,
+            12,
+            31
+        )->endOfDay();
 
         if ($startDate->lt($yearStart)) {
             $startDate = $yearStart->copy();
@@ -62,191 +339,68 @@ class InterventionGenerator
             $endDate = $yearEnd->copy();
         }
 
-        // Vérification des dates.
+        // ============================================================
+        // VALIDATION
+        // ============================================================
+
         if ($startDate->gt($endDate)) {
+
             Log::warning(
-                "Template {$template->id} : date de début supérieure à la date de fin."
+                "Template {$template->id} : "
+                . "date de début supérieure à la date de fin."
             );
 
             return 0;
         }
 
         // ============================================================
-        // GROUPE DE DÉPART
+        // ROTATION ACTIVE
         // ============================================================
 
-        /**
-         * Le groupe choisi dans le formulaire.
-         *
-         * Exemple :
-         *
-         * group_id = 3
-         *
-         * Cela signifie :
-         *
-         * Première intervention -> groupe 3
-         */
+        $rotation = $this->getActiveRotation();
+
+        if (!$rotation) {
+
+            Log::warning(
+                "Template {$template->id} : "
+                . "aucune rotation active trouvée."
+            );
+        }
+
+        // ============================================================
+        // GROUPES
+        // ============================================================
+
         $startingGroupId = $template->group_id
             ? (int) $template->group_id
             : null;
 
-        if (!$startingGroupId) {
+        $groups = $this->getGroupsOrder(
+            $rotation,
+            $startingGroupId
+        );
+
+        if (empty($groups)) {
+
             Log::warning(
-                "Template {$template->id} : aucun groupe responsable défini."
+                "Template {$template->id} : "
+                . "aucun groupe disponible."
             );
 
             return 0;
         }
 
-        Log::info(
-            "Template {$template->id} : groupe de départ = {$startingGroupId}"
-        );
-
         // ============================================================
-        // ROTATION
+        // MÉMOIRE GLOBALE DES SEMAINES
         // ============================================================
 
-        /**
-         * Le template possède normalement :
-         *
-         * group_rotation_id
-         *
-         * Exemple :
-         *
-         * group_rotation_id = 3
-         *
-         * On utilise directement cette rotation.
-         */
-        $rotation = null;
-
-        if ($template->group_rotation_id) {
-            $rotation = GroupRotation::find(
-                $template->group_rotation_id
-            );
-        }
-
-        // ============================================================
-        // ORDRE DES GROUPES
-        // ============================================================
-
-        $groups = [];
-
-        if ($rotation) {
-            $groupsOrder = $rotation->groups_order;
-
-            /**
-             * Selon le modèle GroupRotation,
-             * groups_order peut déjà être un tableau
-             * ou être encore une chaîne JSON.
-             */
-            if (is_string($groupsOrder)) {
-                $groupsOrder = json_decode(
-                    $groupsOrder,
-                    true
-                );
-            }
-
-            if (is_array($groupsOrder)) {
-                $groups = array_values(
-                    array_filter(
-                        $groupsOrder,
-                        function ($groupId) {
-                            return $groupId !== null
-                                && $groupId !== '';
-                        }
-                    )
-                );
-
-                $groups = array_map(
-                    'intval',
-                    $groups
-                );
-            }
-        }
-
-        // ============================================================
-        // AUCUNE ROTATION VALIDE
-        // ============================================================
-
-        /**
-         * Si aucune rotation valide n'est trouvée,
-         * on utilise uniquement le groupe choisi.
-         *
-         * Ainsi, l'intervention n'est pas perdue.
-         */
-        if (empty($groups)) {
-            Log::warning(
-                "Template {$template->id} : aucune rotation valide trouvée. "
-                . "Le groupe {$startingGroupId} sera utilisé seul."
-            );
-
-            $groups = [
-                $startingGroupId
-            ];
-        }
-
-        // ============================================================
-        // POSITION DU GROUPE DE DÉPART
-        // ============================================================
-
-        $startingGroupIndex = array_search(
-            $startingGroupId,
-            $groups,
-            true
-        );
-
-        /**
-         * Le groupe choisi doit obligatoirement
-         * être présent dans la rotation.
-         *
-         * Exemple :
-         *
-         * groups = [1, 3]
-         * startingGroup = 3
-         *
-         * startingIndex = 1
-         */
-        if ($startingGroupIndex === false) {
-            Log::warning(
-                "Template {$template->id} : "
-                . "le groupe {$startingGroupId} n'existe pas "
-                . "dans la rotation."
-            );
-
-            /**
-             * Sécurité :
-             * on utilise le groupe choisi seul.
-             */
-            $groups = [
-                $startingGroupId
-            ];
-
-            $startingGroupIndex = 0;
-        }
-
-        Log::info(
-            "Template {$template->id} : "
-            . "ordre rotation = "
-            . implode(' -> ', $groups)
-            . " | position départ = "
-            . $startingGroupIndex
-        );
+        $weeklyAssignments = [];
 
         // ============================================================
         // COMPTEUR
         // ============================================================
 
         $count = 0;
-
-        /**
-         * Nombre d'occurrences hebdomadaires.
-         *
-         * 0 = première intervention
-         * 1 = deuxième semaine
-         * 2 = troisième semaine
-         * etc.
-         */
-        $occurrenceIndex = 0;
 
         // ============================================================
         // PARCOURS DES DATES
@@ -256,21 +410,23 @@ class InterventionGenerator
 
         while ($current->lte($endDate)) {
 
-            /**
-             * Carbon :
-             *
-             * 1 = lundi
-             * 2 = mardi
-             * 3 = mercredi
-             * 4 = jeudi
-             * 5 = vendredi
-             * 6 = samedi
-             * 7 = dimanche
-             */
+            // ========================================================
+            // JOUR DU TEMPLATE
+            // ========================================================
+
             if (
                 (int) $current->dayOfWeekIso ===
                 (int) $template->day_of_week
             ) {
+
+                // ====================================================
+                // SEMAINE
+                // ====================================================
+
+                $weekKey = $this->getWeeklyAssignments(
+                    $current,
+                    $weeklyAssignments
+                );
 
                 // ====================================================
                 // EXCEPTION
@@ -285,62 +441,7 @@ class InterventionGenerator
                     ->first();
 
                 // ====================================================
-                // GROUPE RESPONSABLE
-                // ====================================================
-
-                /**
-                 * Calcul de la position dans la rotation.
-                 *
-                 * Exemple :
-                 *
-                 * groups = [1, 3]
-                 * startingIndex = 1
-                 *
-                 * occurrence 0 :
-                 * (1 + 0) % 2 = 1 -> groupe 3
-                 *
-                 * occurrence 1 :
-                 * (1 + 1) % 2 = 0 -> groupe 1
-                 *
-                 * occurrence 2 :
-                 * (1 + 2) % 2 = 1 -> groupe 3
-                 */
-                $rotationIndex =
-                    (
-                        $startingGroupIndex
-                        + $occurrenceIndex
-                    )
-                    % count($groups);
-
-                $groupId =
-                    $groups[$rotationIndex]
-                    ?? $startingGroupId;
-
-                // ====================================================
-                // EXCEPTION : GROUPE OVERRIDE
-                // ====================================================
-
-                /**
-                 * Une exception peut temporairement
-                 * remplacer le groupe calculé.
-                 */
-                if (
-                    $exception &&
-                    $exception->group_id_override !== null
-                ) {
-                    $groupId =
-                        (int) $exception->group_id_override;
-
-                    Log::info(
-                        "Template {$template->id} : "
-                        . "groupe remplacé par exception pour "
-                        . $current->toDateString()
-                        . " -> {$groupId}"
-                    );
-                }
-
-                // ====================================================
-                // EXCEPTION : ANNULATION
+                // ANNULATION
                 // ====================================================
 
                 if (
@@ -349,17 +450,288 @@ class InterventionGenerator
                 ) {
 
                     Log::info(
-                        "Template {$template->id} : "
-                        . "intervention du "
-                        . $current->toDateString()
-                        . " annulée."
+                        "Intervention annulée : "
+                        . "template={$template->id}, "
+                        . "date={$current->toDateString()}"
                     );
 
-                    /**
-                     * Même si l'intervention est annulée,
-                     * cette semaine compte dans la rotation.
-                     */
-                    $occurrenceIndex++;
+                    $current->addDay();
+
+                    continue;
+                }
+
+                // ====================================================
+                // GROUPE THÉORIQUE
+                // ====================================================
+
+                $theoreticalGroupId =
+                    $this->getTheoreticalGroup(
+                        $template,
+                        $current,
+                        $groups
+                    );
+
+                if ($theoreticalGroupId === null) {
+
+                    $current->addDay();
+
+                    continue;
+                }
+
+                // ====================================================
+                // GROUPE DEMANDÉ
+                // ====================================================
+
+                $overrideGroupId = null;
+
+                if (
+                    $exception &&
+                    $exception->group_id_override !== null
+                ) {
+
+                    $overrideGroupId =
+                        (int) $exception->group_id_override;
+                }
+
+                $desiredGroup =
+                    $overrideGroupId
+                    ?? $theoreticalGroupId;
+
+                $desiredGroup = (int) $desiredGroup;
+
+                // ====================================================
+                // ÉQUIPEMENT
+                // ====================================================
+
+                $equipmentId =
+                    (int) $template->equipment_id;
+
+                // ====================================================
+                // ÉQUIPEMENT DÉJÀ AFFECTÉ CETTE SEMAINE
+                // ====================================================
+
+                if (
+                    isset(
+                        $weeklyAssignments[$weekKey]
+                            ['equipment_to_group']
+                            [$equipmentId]
+                    )
+                ) {
+
+                    $existingGroup =
+                        $weeklyAssignments[$weekKey]
+                            ['equipment_to_group']
+                            [$equipmentId];
+
+                    Log::warning(
+                        "Conflit équipement/semaine : "
+                        . "equipment={$equipmentId}, "
+                        . "week={$weekKey}, "
+                        . "template={$template->id}. "
+                        . "Groupe déjà attribué={$existingGroup}."
+                    );
+
+                    $current->addDay();
+
+                    continue;
+                }
+
+                // ====================================================
+                // CHOIX DU GROUPE
+                // ====================================================
+
+                $selectedGroup = null;
+
+                // ====================================================
+                // EXCEPTION AVEC GROUPE IMPOSÉ
+                // ====================================================
+
+                if ($overrideGroupId !== null) {
+
+                    if (
+                        !isset(
+                            $weeklyAssignments[$weekKey]
+                                ['group_to_equipment']
+                                [$desiredGroup]
+                        )
+                    ) {
+
+                        $selectedGroup =
+                            $desiredGroup;
+
+                    } else {
+
+                        $occupiedEquipment =
+                            $weeklyAssignments[$weekKey]
+                                ['group_to_equipment']
+                                [$desiredGroup];
+
+                        Log::warning(
+                            "Conflit d'exception : "
+                            . "le groupe {$desiredGroup} "
+                            . "est déjà utilisé par "
+                            . "l'équipement {$occupiedEquipment} "
+                            . "durant la semaine {$weekKey}. "
+                            . "Template={$template->id}."
+                        );
+
+                        $current->addDay();
+
+                        continue;
+                    }
+
+                } else {
+
+                    // =================================================
+                    // ROTATION NORMALE
+                    // =================================================
+
+                    $selectedGroup =
+                        $this->findAvailableGroup(
+                            $desiredGroup,
+                            $groups,
+                            $weeklyAssignments[$weekKey]
+                        );
+
+                    if (
+                        $selectedGroup !== null &&
+                        $selectedGroup !== $desiredGroup
+                    ) {
+
+                        Log::info(
+                            "Réaffectation automatique : "
+                            . "template={$template->id}, "
+                            . "equipment={$equipmentId}, "
+                            . "week={$weekKey}, "
+                            . "groupe théorique={$desiredGroup}, "
+                            . "groupe choisi={$selectedGroup}"
+                        );
+                    }
+                }
+
+                // ====================================================
+                // AUCUN GROUPE DISPONIBLE
+                // ====================================================
+
+                if ($selectedGroup === null) {
+
+                    Log::warning(
+                        "Aucun groupe disponible : "
+                        . "template={$template->id}, "
+                        . "equipment={$equipmentId}, "
+                        . "week={$weekKey}"
+                    );
+
+                    $current->addDay();
+
+                    continue;
+                }
+
+                $selectedGroup = (int) $selectedGroup;
+
+                // ====================================================
+                // DERNIÈRE SÉCURITÉ
+                // ====================================================
+
+                if (
+                    isset(
+                        $weeklyAssignments[$weekKey]
+                            ['group_to_equipment']
+                            [$selectedGroup]
+                    )
+                ) {
+
+                    Log::warning(
+                        "Conflit final groupe/équipement : "
+                        . "template={$template->id}, "
+                        . "group={$selectedGroup}, "
+                        . "week={$weekKey}"
+                    );
+
+                    $current->addDay();
+
+                    continue;
+                }
+
+                // ====================================================
+                // VÉRIFIER DOUBLON TEMPLATE / DATE
+                // ====================================================
+
+                $alreadyExists =
+                    Intervention::where(
+                        'planning_template_id',
+                        $template->id
+                    )
+                    ->whereDate(
+                        'scheduled_date',
+                        $current->toDateString()
+                    )
+                    ->exists();
+
+                if ($alreadyExists) {
+
+                    // On enregistre quand même l'affectation existante
+                    // dans la mémoire globale.
+
+                    $existingIntervention =
+                        Intervention::where(
+                            'planning_template_id',
+                            $template->id
+                        )
+                        ->whereDate(
+                            'scheduled_date',
+                            $current->toDateString()
+                        )
+                        ->first();
+
+                    if ($existingIntervention) {
+
+                        $existingEquipment =
+                            (int) $existingIntervention->equipment_id;
+
+                        $existingGroup =
+                            (int) $existingIntervention->group_id;
+
+                        $this->registerAssignment(
+                            $weeklyAssignments,
+                            $weekKey,
+                            $existingEquipment,
+                            $existingGroup
+                        );
+                    }
+
+                    $current->addDay();
+
+                    continue;
+                }
+
+                // ====================================================
+                // VÉRIFICATION ÉQUIPEMENT / DATE
+                // ====================================================
+
+                $sameEquipmentSameDate =
+                    Intervention::where(
+                        'equipment_id',
+                        $equipmentId
+                    )
+                    ->whereDate(
+                        'scheduled_date',
+                        $current->toDateString()
+                    )
+                    ->whereNotNull(
+                        'planning_template_id'
+                    )
+                    ->exists();
+
+                if ($sameEquipmentSameDate) {
+
+                    Log::warning(
+                        "Doublon équipement/date détecté : "
+                        . "equipment={$equipmentId}, "
+                        . "date={$current->toDateString()}, "
+                        . "template={$template->id}. "
+                        . "Intervention ignorée."
+                    );
 
                     $current->addDay();
 
@@ -372,130 +744,66 @@ class InterventionGenerator
 
                 try {
 
-                    /**
-                     * Vérifier si l'intervention existe déjà.
-                     *
-                     * On évite ainsi les doublons si le générateur
-                     * est exécuté plusieurs fois.
-                     */
-                    $alreadyExists =
-                        Intervention::where(
-                            'planning_template_id',
-                            $template->id
-                        )
-                        ->whereDate(
-                            'scheduled_date',
-                            $current->toDateString()
-                        )
-                        ->exists();
+                    Intervention::create([
 
-                    if (!$alreadyExists) {
+                        'equipment_id' =>
+                            $equipmentId,
 
-                        Intervention::create([
+                        'type' =>
+                            $template->type,
 
-                            // ----------------------------------------
-                            // ÉQUIPEMENT
-                            // ----------------------------------------
+                        'scheduled_date' =>
+                            $current->toDateString(),
 
-                            'equipment_id' =>
-                                $template->equipment_id,
+                        'scheduled_time' =>
+                            $template->start_time,
 
-                            // ----------------------------------------
-                            // TYPE
-                            // ----------------------------------------
+                        'duration' =>
+                            $template->duration,
 
-                            'type' =>
-                                $template->type,
+                        'group_id' =>
+                            $selectedGroup,
 
-                            // ----------------------------------------
-                            // DATE
-                            // ----------------------------------------
+                        'priority' =>
+                            $template->priority,
 
-                            'scheduled_date' =>
-                                $current->toDateString(),
+                        'description' =>
+                            $template->description,
 
-                            // ----------------------------------------
-                            // HEURE
-                            // ----------------------------------------
+                        'status' =>
+                            'en_attente',
 
-                            'scheduled_time' =>
-                                $template->start_time,
+                        'created_by' =>
+                            $template->created_by,
 
-                            // ----------------------------------------
-                            // DURÉE
-                            // ----------------------------------------
+                        'template_id' =>
+                            $template->reading_canvas_id,
 
-                            'duration' =>
-                                $template->duration,
+                        'planning_template_id' =>
+                            $template->id,
+                    ]);
 
-                            // ----------------------------------------
-                            // GROUPE
-                            // ----------------------------------------
+                    // =================================================
+                    // ENREGISTRER L'AFFECTATION
+                    // =================================================
 
-                            'group_id' =>
-                                $groupId,
+                    $this->registerAssignment(
+                        $weeklyAssignments,
+                        $weekKey,
+                        $equipmentId,
+                        $selectedGroup
+                    );
 
-                            // ----------------------------------------
-                            // PRIORITÉ
-                            // ----------------------------------------
+                    $count++;
 
-                            'priority' =>
-                                $template->priority,
-
-                            // ----------------------------------------
-                            // DESCRIPTION
-                            // ----------------------------------------
-
-                            'description' =>
-                                $template->description,
-
-                            // ----------------------------------------
-                            // STATUT
-                            // ----------------------------------------
-
-                            'status' =>
-                                'en_attente',
-
-                            // ----------------------------------------
-                            // CRÉATEUR
-                            // ----------------------------------------
-
-                            'created_by' =>
-                                $template->created_by,
-
-                            // ----------------------------------------
-                            // MODÈLE DE RELEVÉ
-                            // ----------------------------------------
-
-                            'template_id' =>
-                                $template->reading_canvas_id,
-
-                            // ----------------------------------------
-                            // TEMPLATE PLANNING
-                            // ----------------------------------------
-
-                            'planning_template_id' =>
-                                $template->id,
-                        ]);
-
-                        $count++;
-
-                        Log::info(
-                            "Intervention créée : "
-                            . "template={$template->id}, "
-                            . "date={$current->toDateString()}, "
-                            . "group_id={$groupId}, "
-                            . "occurrence={$occurrenceIndex}"
-                        );
-
-                    } else {
-
-                        Log::info(
-                            "Intervention déjà existante : "
-                            . "template={$template->id}, "
-                            . "date={$current->toDateString()}"
-                        );
-                    }
+                    Log::info(
+                        "Intervention créée : "
+                        . "template={$template->id}, "
+                        . "equipment={$equipmentId}, "
+                        . "date={$current->toDateString()}, "
+                        . "week={$weekKey}, "
+                        . "group={$selectedGroup}"
+                    );
 
                 } catch (\Exception $e) {
 
@@ -506,35 +814,24 @@ class InterventionGenerator
                             'template_id' =>
                                 $template->id,
 
+                            'equipment_id' =>
+                                $equipmentId,
+
                             'date' =>
                                 $current->toDateString(),
 
                             'group_id' =>
-                                $groupId,
+                                $selectedGroup,
 
-                            'occurrence_index' =>
-                                $occurrenceIndex,
+                            'week' =>
+                                $weekKey,
                         ]
                     );
                 }
-
-                // ====================================================
-                // SEMAINE SUIVANTE
-                // ====================================================
-
-                $occurrenceIndex++;
             }
-
-            // ========================================================
-            // JOUR SUIVANT
-            // ========================================================
 
             $current->addDay();
         }
-
-        // ============================================================
-        // LOG FINAL
-        // ============================================================
 
         Log::info(
             "Template {$template->id} : "
@@ -549,30 +846,727 @@ class InterventionGenerator
      * GENERATE FOR ALL
      * ============================================================
      *
-     * Génère les interventions de tous les templates actifs.
+     * Génère tous les templates actifs.
+     *
+     * Règles globales :
+     *
+     * - un équipement = un seul groupe par semaine
+     * - un groupe = un seul équipement par semaine
+     *
+     * Les exceptions avec groupe imposé sont traitées en priorité.
      */
     public function generateForAll($year)
     {
+        // ============================================================
+        // TEMPLATES
+        // ============================================================
+
         $templates = PlanningTemplate::where(
             'is_active',
             true
-        )->get();
+        )
+            ->orderBy('id', 'asc')
+            ->get();
 
-        $total = 0;
+        if ($templates->isEmpty()) {
 
-        foreach ($templates as $template) {
+            Log::info(
+                "Aucun template actif pour {$year}."
+            );
 
-            $total += $this->generateForTemplate(
-                $template,
-                $year
+            return 0;
+        }
+
+        // ============================================================
+        // ROTATION UNIQUE
+        // ============================================================
+
+        $rotation = $this->getActiveRotation();
+
+        $allGroups = [];
+
+        if ($rotation) {
+
+            $allGroups =
+                $rotation->getEffectiveGroupsOrder();
+
+            $allGroups = array_values(
+                array_unique(
+                    array_map(
+                        'intval',
+                        $allGroups
+                    )
+                )
             );
         }
 
+        // ============================================================
+        // OCCURRENCES
+        // ============================================================
+
+        $occurrences = [];
+
+        foreach ($templates as $template) {
+
+            // ========================================================
+            // DATES
+            // ========================================================
+
+            $startDate = $template->start_date
+                ? Carbon::parse($template->start_date)
+                : Carbon::create($year, 1, 1);
+
+            $endDate = $template->end_date
+                ? Carbon::parse($template->end_date)
+                : Carbon::create($year, 12, 31);
+
+            $yearStart = Carbon::create(
+                $year,
+                1,
+                1
+            );
+
+            $yearEnd = Carbon::create(
+                $year,
+                12,
+                31
+            );
+
+            if ($startDate->lt($yearStart)) {
+                $startDate = $yearStart->copy();
+            }
+
+            if ($endDate->gt($yearEnd)) {
+                $endDate = $yearEnd->copy();
+            }
+
+            if ($startDate->gt($endDate)) {
+                continue;
+            }
+
+            // ========================================================
+            // GROUPES DU TEMPLATE
+            // ========================================================
+
+            $startingGroupId = $template->group_id
+                ? (int) $template->group_id
+                : null;
+
+            $groups = $this->getGroupsOrder(
+                $rotation,
+                $startingGroupId
+            );
+
+            if (empty($groups)) {
+                continue;
+            }
+
+            // ========================================================
+            // PARCOURS
+            // ========================================================
+
+            $current = $startDate->copy();
+
+            while ($current->lte($endDate)) {
+
+                if (
+                    (int) $current->dayOfWeekIso ===
+                    (int) $template->day_of_week
+                ) {
+
+                    // =================================================
+                    // SEMAINE
+                    // =================================================
+
+                    $weekKey =
+                        $current
+                            ->copy()
+                            ->startOfWeek(
+                                Carbon::MONDAY
+                            )
+                            ->toDateString();
+
+                    // =================================================
+                    // GROUPE THÉORIQUE
+                    // =================================================
+
+                    $theoreticalGroupId =
+                        $this->getTheoreticalGroup(
+                            $template,
+                            $current,
+                            $groups
+                        );
+
+                    if ($theoreticalGroupId === null) {
+                        $current->addDay();
+                        continue;
+                    }
+
+                    // =================================================
+                    // EXCEPTION
+                    // =================================================
+
+                    $exception = $template
+                        ->exceptions()
+                        ->whereDate(
+                            'exception_date',
+                            $current->toDateString()
+                        )
+                        ->first();
+
+                    // =================================================
+                    // ANNULATION
+                    // =================================================
+
+                    if (
+                        $exception &&
+                        $exception->status_override === 'annulee'
+                    ) {
+
+                        $current->addDay();
+
+                        continue;
+                    }
+
+                    // =================================================
+                    // OVERRIDE
+                    // =================================================
+
+                    $overrideGroupId = null;
+
+                    if (
+                        $exception &&
+                        $exception->group_id_override !== null
+                    ) {
+
+                        $overrideGroupId =
+                            (int)
+                            $exception->group_id_override;
+                    }
+
+                    // =================================================
+                    // OCCURRENCE
+                    // =================================================
+
+                    $occurrences[] = [
+
+                        'template' =>
+                            $template,
+
+                        'date' =>
+                            $current->copy(),
+
+                        'week_key' =>
+                            $weekKey,
+
+                        'theoretical_group_id' =>
+                            $theoreticalGroupId,
+
+                        'override_group_id' =>
+                            $overrideGroupId,
+                    ];
+                }
+
+                $current->addDay();
+            }
+        }
+
+        // ============================================================
+        // ORDRE
+        // ============================================================
+        //
+        // 1. semaine
+        // 2. exceptions
+        // 3. template
+        //
+        // ============================================================
+
+        usort(
+            $occurrences,
+            function ($a, $b) {
+
+                $weekCompare =
+                    strcmp(
+                        $a['week_key'],
+                        $b['week_key']
+                    );
+
+                if ($weekCompare !== 0) {
+                    return $weekCompare;
+                }
+
+                $aOverride =
+                    $a['override_group_id'] !== null;
+
+                $bOverride =
+                    $b['override_group_id'] !== null;
+
+                if ($aOverride && !$bOverride) {
+                    return -1;
+                }
+
+                if (!$aOverride && $bOverride) {
+                    return 1;
+                }
+
+                return
+                    $a['template']->id
+                    <=>
+                    $b['template']->id;
+            }
+        );
+
+        // ============================================================
+        // MÉMOIRE
+        // ============================================================
+
+        $weeklyAssignments = [];
+
+        // ============================================================
+        // COMPTEUR
+        // ============================================================
+
+        $total = 0;
+
+        // ============================================================
+        // TRAITEMENT
+        // ============================================================
+
+        foreach ($occurrences as $occurrence) {
+
+            $template =
+                $occurrence['template'];
+
+            $current =
+                $occurrence['date'];
+
+            $weekKey =
+                $occurrence['week_key'];
+
+            $equipmentId =
+                (int) $template->equipment_id;
+
+            // ========================================================
+            // CHARGER LES INTERVENTIONS EXISTANTES
+            // ========================================================
+
+            $this->getWeeklyAssignments(
+                $current,
+                $weeklyAssignments
+            );
+
+            // ========================================================
+            // ÉQUIPEMENT DÉJÀ UTILISÉ CETTE SEMAINE
+            // ========================================================
+
+            if (
+                isset(
+                    $weeklyAssignments[$weekKey]
+                        ['equipment_to_group']
+                        [$equipmentId]
+                )
+            ) {
+
+                Log::warning(
+                    "Conflit équipement/semaine : "
+                    . "equipment={$equipmentId}, "
+                    . "week={$weekKey}, "
+                    . "template={$template->id}. "
+                    . "Occurrence ignorée."
+                );
+
+                continue;
+            }
+
+            // ========================================================
+            // GROUPE DEMANDÉ
+            // ========================================================
+
+            $desiredGroup =
+                $occurrence['override_group_id']
+                ??
+                $occurrence['theoretical_group_id'];
+
+            $desiredGroup =
+                (int) $desiredGroup;
+
+            // ========================================================
+            // GROUPES DU TEMPLATE
+            // ========================================================
+
+            $groups =
+                $allGroups;
+
+            if (empty($groups)) {
+
+                $groups = [
+                    $desiredGroup
+                ];
+            }
+
+            // ========================================================
+            // CHOISIR LE GROUPE
+            // ========================================================
+
+            $selectedGroup = null;
+
+            // ========================================================
+            // EXCEPTION
+            // ========================================================
+
+            if (
+                $occurrence['override_group_id'] !== null
+            ) {
+
+                if (
+                    !isset(
+                        $weeklyAssignments[$weekKey]
+                            ['group_to_equipment']
+                            [$desiredGroup]
+                    )
+                ) {
+
+                    $selectedGroup =
+                        $desiredGroup;
+
+                } else {
+
+                    $occupiedEquipment =
+                        $weeklyAssignments[$weekKey]
+                            ['group_to_equipment']
+                            [$desiredGroup];
+
+                    Log::warning(
+                        "Conflit d'exception : "
+                        . "groupe={$desiredGroup}, "
+                        . "equipment={$occupiedEquipment}, "
+                        . "week={$weekKey}, "
+                        . "template={$template->id}."
+                    );
+
+                    continue;
+                }
+
+            } else {
+
+                // ====================================================
+                // ROTATION NORMALE
+                // ====================================================
+
+                $selectedGroup =
+                    $this->findAvailableGroup(
+                        $desiredGroup,
+                        $groups,
+                        $weeklyAssignments[$weekKey]
+                    );
+
+                if (
+                    $selectedGroup !== null &&
+                    $selectedGroup !== $desiredGroup
+                ) {
+
+                    Log::info(
+                        "Réaffectation automatique : "
+                        . "template={$template->id}, "
+                        . "equipment={$equipmentId}, "
+                        . "week={$weekKey}, "
+                        . "groupe théorique={$desiredGroup}, "
+                        . "groupe choisi={$selectedGroup}"
+                    );
+                }
+            }
+
+            // ========================================================
+            // AUCUN GROUPE
+            // ========================================================
+
+            if ($selectedGroup === null) {
+
+                Log::warning(
+                    "Aucun groupe disponible : "
+                    . "template={$template->id}, "
+                    . "equipment={$equipmentId}, "
+                    . "week={$weekKey}"
+                );
+
+                continue;
+            }
+
+            $selectedGroup =
+                (int) $selectedGroup;
+
+            // ========================================================
+            // SÉCURITÉ GROUPE
+            // ========================================================
+
+            if (
+                isset(
+                    $weeklyAssignments[$weekKey]
+                        ['group_to_equipment']
+                        [$selectedGroup]
+                )
+            ) {
+
+                Log::warning(
+                    "Conflit final : "
+                    . "groupe={$selectedGroup}, "
+                    . "week={$weekKey}, "
+                    . "template={$template->id}."
+                );
+
+                continue;
+            }
+
+            // ========================================================
+            // INTERVENTION EXISTANTE
+            // ========================================================
+
+            $alreadyExists =
+                Intervention::where(
+                    'planning_template_id',
+                    $template->id
+                )
+                ->whereDate(
+                    'scheduled_date',
+                    $current->toDateString()
+                )
+                ->first();
+
+            if ($alreadyExists) {
+
+                $this->registerAssignment(
+                    $weeklyAssignments,
+                    $weekKey,
+                    $alreadyExists->equipment_id,
+                    $alreadyExists->group_id
+                );
+
+                continue;
+            }
+
+            // ========================================================
+            // ÉQUIPEMENT / DATE
+            // ========================================================
+
+            $sameEquipmentSameDate =
+                Intervention::where(
+                    'equipment_id',
+                    $equipmentId
+                )
+                ->whereDate(
+                    'scheduled_date',
+                    $current->toDateString()
+                )
+                ->whereNotNull(
+                    'planning_template_id'
+                )
+                ->exists();
+
+            if ($sameEquipmentSameDate) {
+
+                Log::warning(
+                    "Doublon équipement/date : "
+                    . "equipment={$equipmentId}, "
+                    . "date={$current->toDateString()}, "
+                    . "template={$template->id}."
+                );
+
+                continue;
+            }
+
+            // ========================================================
+            // CRÉATION
+            // ========================================================
+
+            try {
+
+                Intervention::create([
+
+                    'equipment_id' =>
+                        $equipmentId,
+
+                    'type' =>
+                        $template->type,
+
+                    'scheduled_date' =>
+                        $current->toDateString(),
+
+                    'scheduled_time' =>
+                        $template->start_time,
+
+                    'duration' =>
+                        $template->duration,
+
+                    'group_id' =>
+                        $selectedGroup,
+
+                    'priority' =>
+                        $template->priority,
+
+                    'description' =>
+                        $template->description,
+
+                    'status' =>
+                        'en_attente',
+
+                    'created_by' =>
+                        $template->created_by,
+
+                    'template_id' =>
+                        $template->reading_canvas_id,
+
+                    'planning_template_id' =>
+                        $template->id,
+                ]);
+
+                // =================================================
+                // ENREGISTRER
+                // =================================================
+
+                $this->registerAssignment(
+                    $weeklyAssignments,
+                    $weekKey,
+                    $equipmentId,
+                    $selectedGroup
+                );
+
+                $total++;
+
+                Log::info(
+                    "Intervention créée : "
+                    . "template={$template->id}, "
+                    . "equipment={$equipmentId}, "
+                    . "date={$current->toDateString()}, "
+                    . "week={$weekKey}, "
+                    . "group={$selectedGroup}"
+                );
+
+            } catch (\Exception $e) {
+
+                Log::error(
+                    "Erreur création intervention : "
+                    . $e->getMessage(),
+                    [
+                        'template_id' =>
+                            $template->id,
+
+                        'equipment_id' =>
+                            $equipmentId,
+
+                        'date' =>
+                            $current->toDateString(),
+
+                        'group_id' =>
+                            $selectedGroup,
+
+                        'week' =>
+                            $weekKey,
+                    ]
+                );
+            }
+        }
+
+        // ============================================================
+        // LOG
+        // ============================================================
+
         Log::info(
-            'Total général des interventions générées : '
-            . $total
+            "Total général des interventions générées "
+            . "pour {$year} : {$total}"
         );
 
         return $total;
+    }
+
+    /**
+     * ============================================================
+     * RESET PLANNING INTERVENTIONS
+     * ============================================================
+     */
+    public function resetPlanningInterventions($year)
+    {
+        $yearStart = Carbon::create(
+            $year,
+            1,
+            1
+        )->startOfDay();
+
+        $yearEnd = Carbon::create(
+            $year,
+            12,
+            31
+        )->endOfDay();
+
+        $query = Intervention::whereNotNull(
+            'planning_template_id'
+        )
+            ->whereBetween(
+                'scheduled_date',
+                [
+                    $yearStart->toDateString(),
+                    $yearEnd->toDateString(),
+                ]
+            )
+            ->where(
+                'status',
+                'en_attente'
+            );
+
+        $count = $query->count();
+
+        Log::info(
+            "Reset planning {$year} : "
+            . "{$count} interventions en_attente trouvées."
+        );
+
+        $deleted = 0;
+
+        if ($count > 0) {
+            $deleted = $query->delete();
+        }
+
+        Log::info(
+            "Reset planning {$year} terminé : "
+            . "{$deleted} interventions supprimées."
+        );
+
+        return $deleted;
+    }
+
+    /**
+     * ============================================================
+     * RESET AND REGENERATE
+     * ============================================================
+     */
+    public function resetAndRegenerate($year)
+    {
+        return DB::transaction(
+            function () use ($year) {
+
+                $deleted =
+                    $this->resetPlanningInterventions(
+                        $year
+                    );
+
+                $generated =
+                    $this->generateForAll(
+                        $year
+                    );
+
+                Log::info(
+                    "Reset + régénération {$year} terminée : "
+                    . "supprimées={$deleted}, "
+                    . "générées={$generated}"
+                );
+
+                return [
+                    'deleted' =>
+                        $deleted,
+
+                    'generated' =>
+                        $generated,
+                ];
+            }
+        );
     }
 }

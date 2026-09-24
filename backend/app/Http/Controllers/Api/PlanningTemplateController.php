@@ -45,19 +45,8 @@ class PlanningTemplateController extends Controller
      *
      * group_id = groupe choisi pour la PREMIÈRE intervention.
      *
-     * Exemple :
-     *
-     * Rotation :
-     * ALAOUI -> HAFSALAOU -> GROUPE C
-     *
-     * Si l'utilisateur choisit ALAOUI :
-     *
-     * semaine 1 = ALAOUI
-     * semaine 2 = HAFSALAOU
-     * semaine 3 = GROUPE C
-     * semaine 4 = ALAOUI
-     *
-     * La rotation est gérée par InterventionGenerator.
+     * Les interventions suivantes sont automatiquement réparties
+     * entre tous les groupes existants grâce à GroupRotation.
      */
     public function store(Request $request)
     {
@@ -142,89 +131,41 @@ class PlanningTemplateController extends Controller
          * GROUPE DE DÉPART
          * ========================================================
          *
-         * On récupère exactement l'ID envoyé par React.
-         *
-         * Exemple :
-         * Alaoui = 2
-         *
-         * $startingGroupId = 2
+         * Le groupe envoyé par React devient le groupe
+         * de la première intervention.
          */
         $startingGroupId = (int) $validated['group_id'];
 
         /**
          * ========================================================
-         * RECHERCHE DE LA ROTATION
+         * RECHERCHE DE LA ROTATION ACTIVE
          * ========================================================
          *
-         * On cherche une rotation active contenant le groupe
-         * sélectionné.
+         * La rotation n'est plus recherchée en fonction de
+         * groups_order.
+         *
+         * On prend simplement la rotation active.
+         *
+         * Les groupes utilisés par cette rotation sont ensuite
+         * récupérés dynamiquement depuis la table groups.
          */
-        $rotation = null;
-
-        $activeRotations = GroupRotation::where(
-            'is_active',
-            true
-        )
+        $rotation = GroupRotation::where('is_active', true)
             ->orderBy('id')
-            ->get();
-
-        foreach ($activeRotations as $candidateRotation) {
-
-            $groupsOrder = $candidateRotation->groups_order;
-
-            /**
-             * Si groups_order est stocké en JSON sous forme
-             * de chaîne, on le décode.
-             */
-            if (is_string($groupsOrder)) {
-                $groupsOrder = json_decode(
-                    $groupsOrder,
-                    true
-                );
-            }
-
-            if (!is_array($groupsOrder)) {
-                continue;
-            }
-
-            /**
-             * Normaliser les IDs.
-             */
-            $groupsOrder = array_map(
-                'intval',
-                $groupsOrder
-            );
-
-            /**
-             * Vérifier si le groupe choisi existe dans
-             * cette rotation.
-             */
-            if (
-                in_array(
-                    $startingGroupId,
-                    $groupsOrder,
-                    true
-                )
-            ) {
-                $rotation = $candidateRotation;
-
-                break;
-            }
-        }
+            ->first();
 
         /**
          * ========================================================
-         * AUCUNE ROTATION
+         * AUCUNE ROTATION ACTIVE
          * ========================================================
          */
         if (!$rotation) {
             return response()->json([
                 'message' =>
-                    'Le groupe sélectionné ne fait partie d’aucune rotation active.',
+                    'Aucune rotation active n’est disponible.',
 
                 'errors' => [
                     'group_id' => [
-                        'Veuillez sélectionner un groupe appartenant à une rotation active.'
+                        'Veuillez créer ou activer une rotation avant de créer une récurrence.'
                     ],
                 ],
             ], 422);
@@ -232,35 +173,37 @@ class PlanningTemplateController extends Controller
 
         /**
          * ========================================================
-         * NORMALISER L'ORDRE DE ROTATION
+         * ORDRE DE ROTATION DYNAMIQUE
          * ========================================================
+         *
+         * IMPORTANT :
+         *
+         * On n'utilise plus directement :
+         *
+         *     $rotation->groups_order
+         *
+         * car cette ancienne valeur peut contenir seulement
+         * [1, 3].
+         *
+         * getEffectiveGroupsOrder() récupère automatiquement
+         * tous les groupes actuellement présents en base.
+         *
+         * Exemple :
+         *
+         * groupes existants :
+         *     [1, 3, 4]
+         *
+         * rotation dynamique :
+         *     [1, 3, 4]
          */
-        $groupsOrder = $rotation->groups_order;
-
-        if (is_string($groupsOrder)) {
-            $groupsOrder = json_decode(
-                $groupsOrder,
-                true
-            );
-        }
-
-        if (!is_array($groupsOrder)) {
-            return response()->json([
-                'message' =>
-                    'La configuration de la rotation est invalide.',
-            ], 422);
-        }
-
-        $groupsOrder = array_values(
-            array_map(
-                'intval',
-                $groupsOrder
-            )
-        );
+        $groupsOrder = $rotation->getEffectiveGroupsOrder();
 
         /**
-         * Vérification finale :
-         * le groupe choisi doit être présent.
+         * ========================================================
+         * VÉRIFICATION DU GROUPE DE DÉPART
+         * ========================================================
+         *
+         * Le groupe doit exister dans la liste dynamique.
          */
         if (
             !in_array(
@@ -271,7 +214,13 @@ class PlanningTemplateController extends Controller
         ) {
             return response()->json([
                 'message' =>
-                    'Le groupe sélectionné n’existe pas dans l’ordre de rotation.',
+                    'Le groupe sélectionné n’est pas disponible dans la rotation dynamique.',
+
+                'errors' => [
+                    'group_id' => [
+                        'Le groupe sélectionné doit exister dans la liste des groupes.'
+                    ],
+                ],
             ], 422);
         }
 
@@ -280,20 +229,8 @@ class PlanningTemplateController extends Controller
          * CRÉATION DU TEMPLATE
          * ========================================================
          *
-         * TRÈS IMPORTANT :
-         *
-         * On sauvegarde directement le group_id sélectionné.
-         *
-         * Donc si React envoie :
-         *
-         * group_id = 2
-         *
-         * le template aura :
-         *
-         * group_id = 2
-         *
-         * Il ne sera PAS remplacé par le premier groupe
-         * de la rotation.
+         * Le groupe sélectionné est conservé comme groupe
+         * de départ.
          */
         $template = PlanningTemplate::create([
             'equipment_id' =>
@@ -391,8 +328,7 @@ class PlanningTemplateController extends Controller
                 'Template créé avec succès.',
 
             /**
-             * Informations utiles pour vérifier le groupe
-             * réellement enregistré.
+             * Informations utiles pour vérifier la rotation.
              */
             'rotation_info' => [
                 'starting_group_id' =>
@@ -494,81 +430,81 @@ class PlanningTemplateController extends Controller
             $startingGroupId =
                 (int) $validated['group_id'];
 
-            $rotation = null;
-
-            $activeRotations =
-                GroupRotation::where(
-                    'is_active',
-                    true
-                )
-                    ->orderBy('id')
-                    ->get();
-
-            foreach (
-                $activeRotations
-                as $candidateRotation
-            ) {
-
-                $groupsOrder =
-                    $candidateRotation->groups_order;
-
-                if (is_string($groupsOrder)) {
-                    $groupsOrder =
-                        json_decode(
-                            $groupsOrder,
-                            true
-                        );
-                }
-
-                if (!is_array($groupsOrder)) {
-                    continue;
-                }
-
-                $groupsOrder =
-                    array_map(
-                        'intval',
-                        $groupsOrder
-                    );
-
-                if (
-                    in_array(
-                        $startingGroupId,
-                        $groupsOrder,
-                        true
-                    )
-                ) {
-                    $rotation =
-                        $candidateRotation;
-
-                    break;
-                }
-            }
+            /**
+             * ====================================================
+             * RECHERCHE DE LA ROTATION ACTIVE
+             * ====================================================
+             *
+             * On ne vérifie plus groups_order.
+             * La rotation utilise automatiquement tous les
+             * groupes existants.
+             */
+            $rotation = GroupRotation::where('is_active', true)
+                ->orderBy('id')
+                ->first();
 
             /**
-             * Aucun groupe trouvé dans une rotation active.
+             * ====================================================
+             * AUCUNE ROTATION ACTIVE
+             * ====================================================
              */
             if (!$rotation) {
                 return response()->json([
                     'message' =>
-                        'Le groupe sélectionné ne fait partie d’aucune rotation active.',
+                        'Aucune rotation active n’est disponible.',
 
                     'errors' => [
                         'group_id' => [
-                            'Veuillez sélectionner un groupe appartenant à une rotation active.'
+                            'Veuillez créer ou activer une rotation avant de modifier cette récurrence.'
                         ],
                     ],
                 ], 422);
             }
 
             /**
-             * Garder le groupe sélectionné comme groupe
-             * de départ.
+             * ====================================================
+             * ORDRE DE ROTATION DYNAMIQUE
+             * ====================================================
+             */
+            $groupsOrder =
+                $rotation->getEffectiveGroupsOrder();
+
+            /**
+             * ====================================================
+             * VÉRIFICATION DU GROUPE
+             * ====================================================
+             */
+            if (
+                !in_array(
+                    $startingGroupId,
+                    $groupsOrder,
+                    true
+                )
+            ) {
+                return response()->json([
+                    'message' =>
+                        'Le groupe sélectionné n’est pas disponible dans la rotation dynamique.',
+
+                    'errors' => [
+                        'group_id' => [
+                            'Le groupe sélectionné doit exister dans la liste des groupes.'
+                        ],
+                    ],
+                ], 422);
+            }
+
+            /**
+             * ====================================================
+             * GARDER LE GROUPE COMME GROUPE DE DÉPART
+             * ====================================================
              */
             $validated['group_id'] =
                 $startingGroupId;
 
             /**
-             * Mettre à jour la rotation associée.
+             * ====================================================
+             * METTRE À JOUR LA ROTATION ASSOCIÉE
+             * ====================================================
              */
             $validated['group_rotation_id'] =
                 $rotation->id;
