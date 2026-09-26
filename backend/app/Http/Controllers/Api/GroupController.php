@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Api;
 
 use App\Models\Group;
 use App\Models\User;
+use App\Models\GroupRotation;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\DB;
 
 class GroupController extends Controller
 {
@@ -32,12 +34,22 @@ class GroupController extends Controller
      * CRÉER UN GROUPE
      * ============================================================
      *
-     * Le groupe est créé normalement.
+     * Lorsqu'un groupe est créé :
      *
-     * La rotation est dynamique :
-     * le nouveau groupe sera automatiquement pris en compte
-     * par la rotation active lors de la prochaine génération
-     * du planning.
+     * 1. Le groupe est enregistré.
+     * 2. Les utilisateurs sont associés.
+     * 3. Le nouveau groupe est automatiquement ajouté
+     *    à toutes les rotations actives.
+     *
+     * Exemple :
+     *
+     * Rotation :
+     * [1, 2, 3]
+     *
+     * Création du groupe 4
+     *
+     * Résultat :
+     * [1, 2, 3, 4]
      */
     public function store(Request $request)
     {
@@ -54,33 +66,75 @@ class GroupController extends Controller
             ], 422);
         }
 
-        // --------------------------------------------------------
-        // Création du groupe
-        // --------------------------------------------------------
+        DB::beginTransaction();
 
-        $group = Group::create([
-            'name' => $request->name,
-            'description' => $request->description,
-        ]);
+        try {
 
-        // --------------------------------------------------------
-        // Association des utilisateurs
-        // --------------------------------------------------------
+            // --------------------------------------------------------
+            // 1. CRÉATION DU GROUPE
+            // --------------------------------------------------------
 
-        if (
-            $request->has('user_ids') &&
-            !empty($request->user_ids)
-        ) {
-            User::whereIn('id', $request->user_ids)
-                ->update([
-                    'group_id' => $group->id
-                ]);
+            $group = Group::create([
+                'name' => $request->name,
+                'description' => $request->description,
+            ]);
+
+            // --------------------------------------------------------
+            // 2. ASSOCIATION DES UTILISATEURS
+            // --------------------------------------------------------
+
+            if (
+                $request->has('user_ids') &&
+                !empty($request->user_ids)
+            ) {
+                User::whereIn('id', $request->user_ids)
+                    ->update([
+                        'group_id' => $group->id
+                    ]);
+            }
+
+            // --------------------------------------------------------
+            // 3. AJOUT AUTOMATIQUE À TOUTES LES ROTATIONS ACTIVES
+            // --------------------------------------------------------
+            //
+            // Le nouveau groupe est ajouté à la fin de l'ordre
+            // de chaque rotation active.
+            //
+            // Exemple :
+            //
+            // Avant :
+            // [1, 2, 3]
+            //
+            // Nouveau groupe : 4
+            //
+            // Après :
+            // [1, 2, 3, 4]
+            //
+            // --------------------------------------------------------
+
+            $activeRotations = GroupRotation::where('is_active', true)
+                ->get();
+
+            foreach ($activeRotations as $rotation) {
+                $rotation->addGroupToRotation($group->id);
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'data' => $group->load('users'),
+                'message' => 'Groupe créé et ajouté automatiquement aux rotations actives'
+            ], 201);
+
+        } catch (\Exception $e) {
+
+            DB::rollBack();
+
+            return response()->json([
+                'message' => 'Erreur lors de la création du groupe',
+                'error' => $e->getMessage()
+            ], 500);
         }
-
-        return response()->json([
-            'data' => $group->load('users'),
-            'message' => 'Groupe créé avec succès'
-        ], 201);
     }
 
     /**
@@ -121,73 +175,122 @@ class GroupController extends Controller
             ], 422);
         }
 
-        // --------------------------------------------------------
-        // Mise à jour du groupe
-        // --------------------------------------------------------
+        DB::beginTransaction();
 
-        $group->update(
-            $request->only([
-                'name',
-                'description'
-            ])
-        );
+        try {
 
-        // --------------------------------------------------------
-        // Désaffecter les anciens membres
-        // --------------------------------------------------------
+            // --------------------------------------------------------
+            // 1. MISE À JOUR DU GROUPE
+            // --------------------------------------------------------
 
-        User::where('group_id', $group->id)
-            ->update([
-                'group_id' => null
+            $group->update(
+                $request->only([
+                    'name',
+                    'description'
+                ])
+            );
+
+            // --------------------------------------------------------
+            // 2. DÉSAFFECTER LES ANCIENS MEMBRES
+            // --------------------------------------------------------
+
+            User::where('group_id', $group->id)
+                ->update([
+                    'group_id' => null
+                ]);
+
+            // --------------------------------------------------------
+            // 3. AFFECTER LES NOUVEAUX MEMBRES
+            // --------------------------------------------------------
+
+            if (
+                $request->has('user_ids') &&
+                !empty($request->user_ids)
+            ) {
+                User::whereIn('id', $request->user_ids)
+                    ->update([
+                        'group_id' => $group->id
+                    ]);
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'data' => $group->load('users'),
+                'message' => 'Groupe mis à jour'
             ]);
 
-        // --------------------------------------------------------
-        // Affecter les nouveaux membres
-        // --------------------------------------------------------
+        } catch (\Exception $e) {
 
-        if (
-            $request->has('user_ids') &&
-            !empty($request->user_ids)
-        ) {
-            User::whereIn('id', $request->user_ids)
-                ->update([
-                    'group_id' => $group->id
-                ]);
+            DB::rollBack();
+
+            return response()->json([
+                'message' => 'Erreur lors de la mise à jour du groupe',
+                'error' => $e->getMessage()
+            ], 500);
         }
-
-        return response()->json([
-            'data' => $group->load('users'),
-            'message' => 'Groupe mis à jour'
-        ]);
     }
 
     /**
      * ============================================================
      * SUPPRIMER UN GROUPE
      * ============================================================
+     *
+     * Lorsqu'un groupe est supprimé :
+     *
+     * 1. Ses utilisateurs sont désaffectés.
+     * 2. Son ID est retiré automatiquement de toutes les
+     *    rotations.
+     * 3. Le groupe est supprimé.
      */
     public function destroy($id)
     {
         $group = Group::findOrFail($id);
 
-        // --------------------------------------------------------
-        // Désaffecter les membres
-        // --------------------------------------------------------
+        DB::beginTransaction();
 
-        User::where('group_id', $group->id)
-            ->update([
-                'group_id' => null
+        try {
+
+            // --------------------------------------------------------
+            // 1. RETIRER LE GROUPE DE TOUTES LES ROTATIONS
+            // --------------------------------------------------------
+
+            $rotations = GroupRotation::get();
+
+            foreach ($rotations as $rotation) {
+                $rotation->removeGroupFromRotation($group->id);
+            }
+
+            // --------------------------------------------------------
+            // 2. DÉSAFFECTER LES MEMBRES
+            // --------------------------------------------------------
+
+            User::where('group_id', $group->id)
+                ->update([
+                    'group_id' => null
+                ]);
+
+            // --------------------------------------------------------
+            // 3. SUPPRESSION DU GROUPE
+            // --------------------------------------------------------
+
+            $group->delete();
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'Groupe supprimé et retiré automatiquement des rotations'
             ]);
 
-        // --------------------------------------------------------
-        // Suppression
-        // --------------------------------------------------------
+        } catch (\Exception $e) {
 
-        $group->delete();
+            DB::rollBack();
 
-        return response()->json([
-            'message' => 'Groupe supprimé'
-        ]);
+            return response()->json([
+                'message' => 'Erreur lors de la suppression du groupe',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 
     /**
