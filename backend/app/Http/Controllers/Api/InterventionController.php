@@ -143,6 +143,7 @@ class InterventionController extends Controller
         return $intervention;
     }
 
+
     /*
     |--------------------------------------------------------------------------
     | CALENDRIER
@@ -199,6 +200,7 @@ class InterventionController extends Controller
         }
     }
 
+
     /*
     |--------------------------------------------------------------------------
     | LISTE DE TOUTES LES INTERVENTIONS
@@ -254,6 +256,7 @@ class InterventionController extends Controller
             ], 500);
         }
     }
+
 
     /*
     |--------------------------------------------------------------------------
@@ -437,6 +440,7 @@ class InterventionController extends Controller
         }
     }
 
+
     /*
     |--------------------------------------------------------------------------
     | AFFICHER UNE INTERVENTION
@@ -484,6 +488,7 @@ class InterventionController extends Controller
             ], 500);
         }
     }
+
 
     /*
     |--------------------------------------------------------------------------
@@ -610,6 +615,7 @@ class InterventionController extends Controller
         ], 201);
     }
 
+
     /*
     |--------------------------------------------------------------------------
     | MODIFIER UNE INTERVENTION
@@ -706,93 +712,101 @@ class InterventionController extends Controller
         ]);
     }
 
+
     /*
     |--------------------------------------------------------------------------
     | SUPPRIMER UNE INTERVENTION
     |--------------------------------------------------------------------------
     |
-    | IMPORTANT :
-    |
     | Si l'intervention provient d'une PlanningTemplate récurrente,
     | on crée une PlanningException pour cette date uniquement.
-    |
-    | Cela empêche InterventionGenerator de recréer cette occurrence.
     |
     */
 
     public function destroy($id)
-{
-    $intervention = Intervention::findOrFail($id);
+    {
+        $intervention =
+            Intervention::findOrFail($id);
 
-    // On mémorise les informations avant suppression
-    $planningTemplateId = $intervention->planning_template_id;
-    $scheduledDate = $intervention->getScheduledDateRaw();
+        $planningTemplateId =
+            $intervention->planning_template_id;
 
-    DB::beginTransaction();
+        $scheduledDate =
+            $intervention->getScheduledDateRaw();
 
-    try {
-        /*
-         * Si l'intervention provient d'un PlanningTemplate,
-         * on crée une exception pour cette date uniquement.
-         *
-         * Ainsi, le générateur ne recréera pas cette occurrence
-         * lors d'une prochaine génération.
-         */
-        if (
-            !empty($planningTemplateId) &&
-            !empty($scheduledDate)
-        ) {
-            PlanningException::updateOrCreate(
+        DB::beginTransaction();
+
+        try {
+
+            if (
+                !empty($planningTemplateId)
+                &&
+                !empty($scheduledDate)
+            ) {
+
+                PlanningException::updateOrCreate(
+                    [
+                        'planning_template_id' =>
+                            $planningTemplateId,
+
+                        'exception_date' =>
+                            $scheduledDate,
+                    ],
+                    [
+                        'group_id_override' =>
+                            null,
+
+                        'status_override' =>
+                            'annulee',
+
+                        'reason' =>
+                            'Intervention supprimée manuellement.',
+                    ]
+                );
+            }
+
+            $intervention->delete();
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' =>
+                    !empty($planningTemplateId)
+                        ? 'Intervention supprimée et occurrence annulée pour cette date.'
+                        : 'Intervention supprimée'
+            ]);
+
+        } catch (\Exception $e) {
+
+            DB::rollBack();
+
+            Log::error(
+                'Erreur suppression intervention : ' .
+                $e->getMessage(),
                 [
-                    'planning_template_id' => $planningTemplateId,
-                    'exception_date' => $scheduledDate,
-                ],
-                [
-                    'group_id_override' => null,
-                    'status_override' => 'annulee',
-                    'reason' =>
-                        'Intervention supprimée manuellement.',
+                    'intervention_id' =>
+                        $id,
+
+                    'planning_template_id' =>
+                        $planningTemplateId,
+
+                    'scheduled_date' =>
+                        $scheduledDate,
                 ]
             );
+
+            return response()->json([
+                'success' => false,
+                'message' =>
+                    'Erreur lors de la suppression de l’intervention.',
+                'error' =>
+                    $e->getMessage()
+            ], 500);
         }
-
-        // Suppression de l'intervention
-        $intervention->delete();
-
-        DB::commit();
-
-        return response()->json([
-            'success' => true,
-            'message' =>
-                !empty($planningTemplateId)
-                    ? 'Intervention supprimée et occurrence annulée pour cette date.'
-                    : 'Intervention supprimée'
-        ]);
-
-    } catch (\Exception $e) {
-
-        DB::rollBack();
-
-        Log::error(
-            'Erreur suppression intervention : ' .
-            $e->getMessage(),
-            [
-                'intervention_id' => $id,
-                'planning_template_id' =>
-                    $planningTemplateId,
-                'scheduled_date' =>
-                    $scheduledDate,
-            ]
-        );
-
-        return response()->json([
-            'success' => false,
-            'message' =>
-                'Erreur lors de la suppression de l’intervention.',
-            'error' => $e->getMessage()
-        ], 500);
     }
-}
+
+
     /*
     |--------------------------------------------------------------------------
     | AFFECTER UNE INTERVENTION
@@ -905,6 +919,7 @@ class InterventionController extends Controller
                 'Intervention affectée'
         ]);
     }
+
 
     /*
     |--------------------------------------------------------------------------
@@ -1164,21 +1179,21 @@ class InterventionController extends Controller
 
                         'scheduled_date' =>
                             $declaredDateTime
-                            ? $declaredDateTime
-                                ->format('Y-m-d')
-                            : null,
+                                ? $declaredDateTime
+                                    ->format('Y-m-d')
+                                : null,
 
                         'scheduled_time' =>
                             $declaredDateTime
-                            ? $declaredDateTime
-                                ->format('H:i:s')
-                            : null,
+                                ? $declaredDateTime
+                                    ->format('H:i:s')
+                                : null,
 
                         'available_at' =>
                             $declaredDateTime
-                            ? $declaredDateTime
-                                ->toIso8601String()
-                            : null,
+                                ? $declaredDateTime
+                                    ->toIso8601String()
+                                : null,
 
                         'resolution_date' =>
                             $ticket->resolution_date,
@@ -1314,6 +1329,7 @@ class InterventionController extends Controller
             ], 500);
         }
     }
+
 
     /*
     |--------------------------------------------------------------------------
@@ -1913,6 +1929,7 @@ class InterventionController extends Controller
         }
     }
 
+
     /*
     |--------------------------------------------------------------------------
     | DÉMARRER UNE INTERVENTION
@@ -1928,6 +1945,24 @@ class InterventionController extends Controller
             ])->findOrFail($id);
 
         $user = auth()->user();
+
+        /*
+        |--------------------------------------------------------------------------
+        | VÉRIFIER LE RÔLE
+        |--------------------------------------------------------------------------
+        |
+        | Seul l'intervenant / ATSEP peut démarrer une intervention.
+        |
+        */
+
+        if ($user->role !== 'intervenant') {
+
+            return response()->json([
+                'success' => false,
+                'message' =>
+                    'Seul un intervenant / ATSEP peut démarrer une intervention.'
+            ], 403);
+        }
 
         /*
         |--------------------------------------------------------------------------
@@ -2129,6 +2164,7 @@ class InterventionController extends Controller
         }
     }
 
+
     /*
     |--------------------------------------------------------------------------
     | TERMINER UNE INTERVENTION
@@ -2144,6 +2180,24 @@ class InterventionController extends Controller
             Intervention::findOrFail($id);
 
         $user = auth()->user();
+
+        /*
+        |--------------------------------------------------------------------------
+        | VÉRIFIER LE RÔLE
+        |--------------------------------------------------------------------------
+        |
+        | Seul l'intervenant / ATSEP peut finaliser une intervention.
+        |
+        */
+
+        if ($user->role !== 'intervenant') {
+
+            return response()->json([
+                'success' => false,
+                'message' =>
+                    'Seul un intervenant / ATSEP peut finaliser une intervention.'
+            ], 403);
+        }
 
         /*
         |--------------------------------------------------------------------------
@@ -2270,6 +2324,7 @@ class InterventionController extends Controller
         ]);
     }
 
+
     /*
     |--------------------------------------------------------------------------
     | SOUMETTRE LE RELEVÉ
@@ -2287,6 +2342,24 @@ class InterventionController extends Controller
             ])->findOrFail($id);
 
         $user = auth()->user();
+
+        /*
+        |--------------------------------------------------------------------------
+        | VÉRIFIER LE RÔLE
+        |--------------------------------------------------------------------------
+        |
+        | Seul l'intervenant / ATSEP peut saisir un relevé.
+        |
+        */
+
+        if ($user->role !== 'intervenant') {
+
+            return response()->json([
+                'success' => false,
+                'message' =>
+                    'Seul un intervenant / ATSEP peut saisir un relevé.'
+            ], 403);
+        }
 
         /*
         |--------------------------------------------------------------------------

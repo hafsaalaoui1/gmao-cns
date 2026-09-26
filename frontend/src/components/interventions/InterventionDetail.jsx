@@ -32,458 +32,367 @@ import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
 
 import api from '../../services/api';
+import { useAuth } from '../../contexts/AuthContext';
 import './InterventionDetail.css';
 
-/* ==========================================================================
-   HELPERS & UTILS
-   ========================================================================== */
+/* ============================================================
+   HELPERS
+============================================================ */
 
 const normalizeReadingValues = (values) => {
     if (!values) return {};
 
     if (typeof values === 'string') {
         try {
-            values = JSON.parse(values);
-        } catch (error) {
+            return JSON.parse(values);
+        } catch {
             return {};
         }
     }
 
-    if (Array.isArray(values)) {
-        return values.reduce(
-            (acc, val, idx) => ({
-                ...acc,
-                [idx]: val
-            }),
-            {}
-        );
+    if (typeof values === 'object') {
+        return values;
     }
 
-    return typeof values === 'object' && values !== null ? values : {};
+    return {};
 };
 
-const isMeaningfulValue = (val) =>
-    val !== null &&
-    val !== undefined &&
-    (typeof val !== 'string' || val.trim() !== '');
+const isMeaningfulValue = (value) => {
+    if (value === null || value === undefined) return false;
+
+    if (typeof value === 'string') {
+        return value.trim() !== '';
+    }
+
+    return true;
+};
 
 const readingHasValues = (reading) => {
     if (!reading) return false;
 
-    const values = normalizeReadingValues(reading.values);
-
-    return Object.keys(values).some(
-        (key) =>
-            !String(key).startsWith('_') &&
-            isMeaningfulValue(values[key])
+    const values = normalizeReadingValues(
+        reading.values ?? reading.reading_values
     );
+
+    if (
+        values &&
+        typeof values === 'object' &&
+        Object.keys(values).length > 0
+    ) {
+        return Object.values(values).some(isMeaningfulValue);
+    }
+
+    return false;
 };
 
 const getReadingTime = (reading) => {
-    if (!reading) return 0;
-
-    const val =
-        reading.taken_at ||
-        reading.created_at ||
-        reading.updated_at ||
-        0;
-
-    const ts = new Date(val).getTime();
-
-    return Number.isNaN(ts) ? 0 : ts;
+    return (
+        reading?.reading_date ||
+        reading?.measured_at ||
+        reading?.created_at ||
+        reading?.updated_at ||
+        null
+    );
 };
 
-const normalizeKey = (key) =>
-    String(key ?? '')
+const normalizeKey = (value) => {
+    return String(value ?? '')
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '');
+};
+
+const normalizeStatus = (value) => {
+    return String(value ?? '')
         .trim()
         .toLowerCase()
-        .replace(/[\s-]+/g, '_');
+        .replace(/\s+/g, '_')
+        .replace(/-/g, '_');
+};
 
-const normalizeStatus = (status) =>
-    String(status ?? '')
-        .trim()
-        .toLowerCase()
-        .replace(/\s+/g, '_');
-
-const findValueByKeys = (values, possibleKeys) => {
-    const normalizedValues = normalizeReadingValues(values);
-
-    for (const key of possibleKeys) {
-        if (
-            Object.prototype.hasOwnProperty.call(
-                normalizedValues,
-                key
-            )
-        ) {
-            return normalizedValues[key];
-        }
+const findValueByKeys = (values, keys = []) => {
+    if (!values || typeof values !== 'object') {
+        return undefined;
     }
 
-    const normalizedPossibleKeys =
-        possibleKeys.map(normalizeKey);
+    const normalizedEntries = Object.entries(values).map(
+        ([key, value]) => [normalizeKey(key), value]
+    );
 
-    for (const [existingKey, value] of Object.entries(
-        normalizedValues
-    )) {
-        if (
-            normalizedPossibleKeys.includes(
-                normalizeKey(existingKey)
-            )
-        ) {
-            return value;
+    for (const key of keys) {
+        const normalizedTarget = normalizeKey(key);
+
+        const exact = normalizedEntries.find(
+            ([normalizedKey]) => normalizedKey === normalizedTarget
+        );
+
+        if (exact) {
+            return exact[1];
         }
     }
 
     return undefined;
 };
 
-const getParameterReadingValue = (
-    values,
-    parameter,
-    parameterIndex,
-    monitorIndex
-) => {
-    const monitorNum = monitorIndex + 1;
+const getParameterReadingValue = (values, parameter) => {
+    if (!parameter) return undefined;
 
-    const parameterId =
-        parameter?.id ??
-        parameter?.key ??
-        `parameter-${parameterIndex}`;
-
+    const parameterId = parameter.id ?? parameter.parameter_id;
     const parameterName =
-        parameter?.name ??
-        parameter?.parameter ??
-        parameter?.label ??
-        `Paramètre ${parameterIndex + 1}`;
+        parameter.name ??
+        parameter.label ??
+        parameter.parameter_name ??
+        '';
 
-    const possibleKeys = [
-        `${parameterId}_monitor_${monitorNum}`,
-        `${parameterId}_moniteur_${monitorNum}`,
-        `${parameterName}_monitor_${monitorNum}`,
-        `${parameterIndex + 1}_monitor_${monitorNum}`
-    ];
-
-    const directValue = findValueByKeys(
-        values,
-        possibleKeys
-    );
-
-    if (directValue !== undefined && directValue !== null) {
-        return directValue;
-    }
-
-    const normalizedValues =
-        normalizeReadingValues(values);
-
-    for (const key of [
+    const keys = [
         parameterId,
+        String(parameterId ?? ''),
         parameterName,
-        String(parameterIndex + 1)
-    ]) {
-        const nested = normalizedValues[key];
+        normalizeKey(parameterName),
+        `parameter_${parameterId}`,
+        `param_${parameterId}`,
+        `value_${parameterId}`
+    ].filter(Boolean);
 
-        if (nested && typeof nested === 'object') {
-            const nestedValue = findValueByKeys(
-                nested,
-                [
-                    `monitor_${monitorNum}`,
-                    `moniteur_${monitorNum}`,
-                    String(monitorNum)
-                ]
-            );
+    return findValueByKeys(values, keys);
+};
 
-            if (nestedValue !== undefined) {
-                return nestedValue;
-            }
+const buildFormValuesFromReading = (reading) => {
+    if (!reading) return {};
+
+    return normalizeReadingValues(
+        reading.values ??
+        reading.reading_values ??
+        reading.data ??
+        {}
+    );
+};
+
+const buildReadingFormFromReading = (reading) => {
+    if (!reading) {
+        return {
+            values: {},
+            observation: '',
+            annexes: []
+        };
+    }
+
+    let annexes = reading.annexes ?? [];
+
+    if (typeof annexes === 'string') {
+        try {
+            annexes = JSON.parse(annexes);
+        } catch {
+            annexes = [];
         }
     }
 
-    return '';
-};
+    if (!Array.isArray(annexes)) {
+        annexes = [];
+    }
 
-const buildFormValuesFromReading = (
-    reading,
-    normalizedParameters
-) => {
-    const sourceValues =
-        normalizeReadingValues(reading?.values);
-
-    const result = {
-        ...sourceValues
+    return {
+        values: buildFormValuesFromReading(reading),
+        observation:
+            reading.observation ??
+            reading.observations ??
+            '',
+        annexes
     };
-
-    normalizedParameters.forEach(
-        (parameter, parameterIndex) => {
-            const monitors = Math.max(
-                Number(parameter.monitors) || 1,
-                1
-            );
-
-            for (
-                let monitorIndex = 0;
-                monitorIndex < monitors;
-                monitorIndex++
-            ) {
-                const val =
-                    getParameterReadingValue(
-                        sourceValues,
-                        parameter,
-                        parameterIndex,
-                        monitorIndex
-                    );
-
-                if (val !== undefined && val !== null) {
-                    const key = `${
-                        parameter.id ||
-                        `parameter-${parameterIndex}`
-                    }_monitor_${monitorIndex + 1}`;
-
-                    result[key] = val;
-                }
-            }
-        }
-    );
-
-    return result;
 };
-
-const buildReadingFormFromReading = (
-    reading,
-    normalizedParameters
-) => ({
-    values: buildFormValuesFromReading(
-        reading,
-        normalizedParameters
-    ),
-    observation:
-        reading?.commentaire ||
-        reading?.comment ||
-        reading?.observation ||
-        '',
-    annexes: Array.isArray(reading?.annexes)
-        ? reading.annexes
-        : []
-});
 
 const formatDate = (date) => {
     if (!date) return '—';
 
-    try {
-        return new Date(date).toLocaleDateString(
-            'fr-FR',
-            {
-                day: '2-digit',
-                month: '2-digit',
-                year: 'numeric'
-            }
-        );
-    } catch {
-        return date;
+    const parsed = new Date(date);
+
+    if (Number.isNaN(parsed.getTime())) {
+        return '—';
     }
+
+    return parsed.toLocaleDateString('fr-FR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+    });
 };
 
 const formatDateTime = (date) => {
     if (!date) return '—';
 
-    try {
-        return new Date(date).toLocaleString(
-            'fr-FR',
-            {
-                day: '2-digit',
-                month: '2-digit',
-                year: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-            }
-        );
-    } catch {
-        return date;
+    const parsed = new Date(date);
+
+    if (Number.isNaN(parsed.getTime())) {
+        return '—';
     }
+
+    return parsed.toLocaleString('fr-FR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
 };
 
 const getStatusConfig = (status) => {
-    const normalizedStatus = normalizeStatus(status);
+    const normalized = normalizeStatus(status);
 
     const configs = {
+        en_attente: {
+            label: 'En attente',
+            className: 'status-pending',
+            icon: Clock
+        },
+
         planifiee: {
             label: 'Planifiée',
-            class: 'status-planifiee',
+            className: 'status-pending',
             icon: Calendar
         },
 
-        en_attente: {
-            label: 'En attente',
-            class: 'status-planifiee',
-            icon: Clock
+        en_retard: {
+            label: 'En retard',
+            className: 'status-late',
+            icon: AlertCircle
         },
 
         en_cours: {
             label: 'En cours',
-            class: 'status-en-cours',
+            className: 'status-progress',
             icon: PlayCircle
         },
 
         terminee: {
             label: 'Terminée',
-            class: 'status-terminee',
+            className: 'status-completed',
             icon: CheckCircle2
         },
 
         validee: {
             label: 'Validée',
-            class: 'status-validee',
+            className: 'status-validated',
             icon: CheckCircle2
         },
 
-        valide: {
-            label: 'Validé',
-            class: 'status-validee',
-            icon: CheckCircle2
-        },
-
-        rejetee: {
-            label: 'Rejetée',
-            class: 'status-rejetee',
-            icon: AlertCircle
-        },
-
-        rejete: {
-            label: 'Rejeté',
-            class: 'status-rejetee',
-            icon: AlertCircle
-        },
-
-        modifications_demandees: {
-            label: 'Modifications requises',
-            class: 'status-modifications',
-            icon: RotateCcw
-        },
-
-        cloturee: {
-            label: 'Clôturée',
-            class: 'status-terminee',
-            icon: CheckCircle2
-        },
-
-        en_retard: {
-            label: 'En retard',
-            class: 'status-retard',
-            icon: AlertCircle
+        annulee: {
+            label: 'Annulée',
+            className: 'status-cancelled',
+            icon: X
         }
     };
 
     return (
-        configs[normalizedStatus] || {
+        configs[normalized] || {
             label: status || 'Inconnu',
-            class: 'status-default',
+            className: 'status-default',
             icon: Info
         }
     );
 };
 
 const getPriorityConfig = (priority) => {
+    const normalized = normalizeStatus(priority);
+
     const configs = {
+        basse: {
+            label: 'Basse',
+            className: 'priority-low'
+        },
+
         faible: {
             label: 'Faible',
-            class: 'prio-faible'
+            className: 'priority-low'
+        },
+
+        moyenne: {
+            label: 'Moyenne',
+            className: 'priority-medium'
         },
 
         normale: {
             label: 'Normale',
-            class: 'prio-normale'
+            className: 'priority-medium'
         },
 
-        elevee: {
-            label: 'Élevée',
-            class: 'prio-elevee'
+        haute: {
+            label: 'Haute',
+            className: 'priority-high'
         },
 
         urgente: {
             label: 'Urgente',
-            class: 'prio-urgente'
+            className: 'priority-critical'
+        },
+
+        critique: {
+            label: 'Critique',
+            className: 'priority-critical'
         }
     };
 
     return (
-        configs[priority] || {
+        configs[normalized] || {
             label: priority || '—',
-            class: ''
+            className: 'priority-default'
         }
     );
 };
 
-/* ==========================================================================
-   HOOK DATA
-   ========================================================================== */
+/* ============================================================
+   HOOK - DONNÉES INTERVENTION
+============================================================ */
 
 const useInterventionData = (id) => {
-    const [intervention, setIntervention] =
-        useState(null);
-
-    const [readings, setReadings] =
-        useState([]);
-
-    const [loading, setLoading] =
-        useState(true);
-
-    const [refreshing, setRefreshing] =
-        useState(false);
+    const [intervention, setIntervention] = useState(null);
+    const [readings, setReadings] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
 
     const fetchIntervention = useCallback(
-        async (showToast = false) => {
+        async (silent = false) => {
             if (!id) return;
 
-            if (showToast) {
-                setRefreshing(true);
-            } else {
-                setLoading(true);
-            }
-
             try {
-                const response =
-                    await api.get(
-                        `/interventions/${id}`
-                    );
+                if (silent) {
+                    setRefreshing(true);
+                } else {
+                    setLoading(true);
+                }
+
+                const [interventionResponse, readingsResponse] =
+                    await Promise.all([
+                        api.get(`/interventions/${id}`),
+                        api.get(`/interventions/${id}/readings`)
+                    ]);
 
                 setIntervention(
-                    response.data?.data ||
-                        response.data
+                    interventionResponse.data?.data ??
+                    interventionResponse.data
                 );
 
-                try {
-                    const readingsResponse =
-                        await api.get(
-                            `/interventions/${id}/readings`
-                        );
+                const readingsData =
+                    readingsResponse.data?.data ??
+                    readingsResponse.data ??
+                    [];
 
-                    const readingsData =
-                        readingsResponse.data?.data ||
-                        readingsResponse.data ||
-                        [];
-
-                    setReadings(
-                        Array.isArray(readingsData)
-                            ? readingsData
-                            : []
-                    );
-                } catch (error) {
-                    setReadings([]);
-                }
-
-                if (showToast) {
-                    toast.success(
-                        'Données actualisées'
-                    );
-                }
+                setReadings(
+                    Array.isArray(readingsData)
+                        ? readingsData
+                        : []
+                );
             } catch (error) {
+                console.error(
+                    'Erreur chargement intervention :',
+                    error
+                );
+
                 toast.error(
                     error.response?.data?.message ||
-                        'Erreur de chargement.'
+                    'Impossible de charger l’intervention'
                 );
-
-                setIntervention(null);
             } finally {
                 setLoading(false);
                 setRefreshing(false);
@@ -505,477 +414,483 @@ const useInterventionData = (id) => {
     };
 };
 
-/* ==========================================================================
+/* ============================================================
    MODAL RELEVÉ
-   ========================================================================== */
+============================================================ */
 
 const ReadingModal = ({
-    assignedCanvas,
-    intervention,
-    normalizedParameters,
-    monitorCount,
-    readingForm,
-    onValueChange,
-    onObservationChange,
-    onSave,
+    isOpen,
     onClose,
-    saving,
-    equipmentName,
-    correctionMode,
-    readOnly,
-    activeReading,
-    onExportExcel
+    intervention,
+    reading,
+    form,
+    setForm,
+    parameters,
+    readOnly = false,
+    correctionMode = false,
+    saving = false,
+    onSave
 }) => {
-    const statusCfg = getStatusConfig(
-        activeReading?.validation_status
+    const [exporting, setExporting] = useState(false);
+
+    if (!isOpen) return null;
+
+    const values = form?.values ?? {};
+
+    const validationStatus = normalizeStatus(
+        reading?.validation_status
     );
 
-    const StatusIcon = statusCfg.icon;
+    const validationLabels = {
+        valide: 'Validé',
+        rejete: 'Rejeté',
+        modifications_demandees:
+            'Modifications demandées'
+    };
+
+    const exportExcel = () => {
+        try {
+            setExporting(true);
+
+            const rows = parameters.map((parameter) => ({
+                Paramètre:
+                    parameter.name ||
+                    parameter.label ||
+                    `Paramètre ${parameter.id}`,
+
+                Unité:
+                    parameter.unit ||
+                    parameter.unity ||
+                    '—',
+
+                Valeur:
+                    getParameterReadingValue(
+                        values,
+                        parameter
+                    ) ?? '—'
+            }));
+
+            if (form?.observation) {
+                rows.push({
+                    Paramètre: 'Observations',
+                    Unité: '',
+                    Valeur: form.observation
+                });
+            }
+
+            const worksheet =
+                XLSX.utils.json_to_sheet(rows);
+
+            const workbook =
+                XLSX.utils.book_new();
+
+            XLSX.utils.book_append_sheet(
+                workbook,
+                worksheet,
+                'Relevé'
+            );
+
+            XLSX.writeFile(
+                workbook,
+                `releve-intervention-${intervention?.id ?? 'export'}.xlsx`
+            );
+
+            toast.success('Relevé exporté avec succès');
+        } catch (error) {
+            console.error(error);
+            toast.error('Erreur lors de l’export Excel');
+        } finally {
+            setExporting(false);
+        }
+    };
+
+    const updateValue = (parameter, value) => {
+        if (readOnly) return;
+
+        const parameterId = parameter.id;
+
+        setForm((previous) => ({
+            ...previous,
+            values: {
+                ...(previous.values ?? {}),
+                [parameterId]: value
+            }
+        }));
+    };
+
+    const updateObservation = (value) => {
+        if (readOnly) return;
+
+        setForm((previous) => ({
+            ...previous,
+            observation: value
+        }));
+    };
 
     return (
-        <div
-            className="reading-modal-overlay"
-            onMouseDown={(e) =>
-                e.target === e.currentTarget &&
-                onClose()
-            }
-        >
+        <div className="reading-modal-overlay">
             <div className="reading-modal">
                 <div className="reading-modal-header">
                     <div>
-                        <span className="modal-subtitle">
-                            {readOnly
-                                ? 'CONSULTATION DU RELEVÉ'
-                                : correctionMode
-                                ? 'MODIFICATION DU RELEVÉ'
-                                : 'RELEVÉ DE MAINTENANCE'}
-                        </span>
+                        <div className="reading-modal-title">
+                            <ClipboardList size={20} />
+                            <span>
+                                {readOnly
+                                    ? 'Consultation du relevé'
+                                    : correctionMode
+                                        ? 'Modification du relevé'
+                                        : 'Saisie du relevé'}
+                            </span>
+                        </div>
 
-                        <h2>
-                            {assignedCanvas.template_name ||
-                                'Fiche de Relevé'}
-                        </h2>
+                        <div className="reading-modal-subtitle">
+                            Intervention #{intervention?.id}
+                        </div>
                     </div>
 
                     <button
                         type="button"
-                        className="reading-modal-close"
+                        className="modal-close-button"
                         onClick={onClose}
-                        title="Fermer"
                     >
                         <X size={20} />
                     </button>
                 </div>
 
                 <div className="reading-modal-body">
-                    <div className="reading-document">
+                    {reading && (
+                        <div className="reading-validation-banner">
+                            <Info size={18} />
 
-                        <div className="document-top">
-                            <div className="document-brand">
-                                <strong>ONDA</strong>
-                                <span>
-                                    OFFICE NATIONAL DES
-                                    AÉROPORTS
-                                </span>
-                            </div>
-
-                            <div className="document-code">
-                                <span>
-                                    CODE DOCUMENT
-                                </span>
-
+                            <div>
                                 <strong>
-                                    {assignedCanvas.header
-                                        ?.code || '—'}
+                                    État du relevé
                                 </strong>
+
+                                <span>
+                                    {validationLabels[
+                                        validationStatus
+                                    ] ||
+                                        reading.validation_status ||
+                                        'Non validé'}
+                                </span>
                             </div>
                         </div>
+                    )}
 
-                        <div className="document-division">
-                            {assignedCanvas.header
-                                ?.division ||
-                                'DIVISION TECHNIQUE NAVIGATION AÉRIENNE'}
+                    <div className="reading-info-grid">
+                        <div className="reading-info-item">
+                            <span>Intervention</span>
+                            <strong>
+                                #{intervention?.id ?? '—'}
+                            </strong>
                         </div>
 
-                        {activeReading?.validation_status && (
-                            <div className="reading-status-banner">
-                                <div className="status-banner-left">
-                                    <span
-                                        className={`status-badge ${statusCfg.class}`}
-                                    >
-                                        <StatusIcon size={14} />
-                                        {statusCfg.label}
-                                    </span>
+                        <div className="reading-info-item">
+                            <span>Équipement</span>
+                            <strong>
+                                {intervention?.equipment?.name ||
+                                    intervention?.equipment_name ||
+                                    '—'}
+                            </strong>
+                        </div>
 
-                                    {activeReading.validated_at && (
-                                        <span className="validated-at-text">
-                                            Validé le{' '}
-                                            <strong>
-                                                {formatDateTime(
-                                                    activeReading.validated_at
-                                                )}
-                                            </strong>
-                                        </span>
-                                    )}
-                                </div>
-
-                                {activeReading.validation_commentaire && (
-                                    <div className="validation-comment-box">
-                                        <MessageSquare size={14} />
-
-                                        <span>
-                                            <strong>
-                                                Note responsable :
-                                            </strong>{' '}
-                                            {
-                                                activeReading.validation_commentaire
-                                            }
-                                        </span>
-                                    </div>
+                        <div className="reading-info-item">
+                            <span>Date</span>
+                            <strong>
+                                {formatDateTime(
+                                    getReadingTime(reading)
                                 )}
-                            </div>
-                        )}
-
-                        <div className="document-identification">
-                            <div className="document-field">
-                                <span>AÉROPORT</span>
-                                <strong>
-                                    {assignedCanvas.header
-                                        ?.aeroport ||
-                                        'FES SAISS'}
-                                </strong>
-                            </div>
-
-                            <div className="document-field">
-                                <span>ÉQUIPEMENT</span>
-                                <strong>
-                                    {assignedCanvas.equipment
-                                        ?.name ||
-                                        equipmentName}
-                                </strong>
-                            </div>
-
-                            <div className="document-field">
-                                <span>FRÉQUENCE</span>
-                                <strong>
-                                    {assignedCanvas.frequency ||
-                                        '—'}
-                                </strong>
-                            </div>
-
-                            <div className="document-field">
-                                <span>
-                                    DATE PLANNIFIÉE
-                                </span>
-                                <strong>
-                                    {formatDate(
-                                        intervention.scheduled_date
-                                    )}
-                                </strong>
-                            </div>
-                        </div>
-
-                        <div className="document-section">
-                            <div className="document-section-title">
-                                <Sliders size={16} />
-                                RELEVÉ DES MESURES
-                            </div>
-
-                            {normalizedParameters.length >
-                            0 ? (
-                                <div className="interactive-reading-table-wrapper">
-                                    <table className="interactive-reading-table">
-                                        <thead>
-                                            <tr>
-                                                <th>
-                                                    Paramètre
-                                                </th>
-
-                                                <th>
-                                                    Unité
-                                                </th>
-
-                                                {Array.from({
-                                                    length: monitorCount
-                                                }).map(
-                                                    (_, i) => (
-                                                        <th
-                                                            key={i}
-                                                            className="text-center"
-                                                        >
-                                                            Moniteur{' '}
-                                                            {i +
-                                                                1}
-                                                        </th>
-                                                    )
-                                                )}
-
-                                                <th>
-                                                    Tolérance
-                                                </th>
-
-                                                <th>
-                                                    Plage normale
-                                                </th>
-                                            </tr>
-                                        </thead>
-
-                                        <tbody>
-                                            {normalizedParameters.map(
-                                                (
-                                                    param,
-                                                    pIdx
-                                                ) => (
-                                                    <tr
-                                                        key={
-                                                            param.id ||
-                                                            pIdx
-                                                        }
-                                                    >
-                                                        <td>
-                                                            <strong>
-                                                                {
-                                                                    param.name
-                                                                }
-                                                            </strong>
-                                                        </td>
-
-                                                        <td>
-                                                            <span className="unit-tag">
-                                                                {param.unit ||
-                                                                    '—'}
-                                                            </span>
-                                                        </td>
-
-                                                        {Array.from({
-                                                            length: monitorCount
-                                                        }).map(
-                                                            (
-                                                                _,
-                                                                mIdx
-                                                            ) => {
-                                                                const hasMonitor =
-                                                                    mIdx <
-                                                                    param.monitors;
-
-                                                                const key = `${
-                                                                    param.id ||
-                                                                    `parameter-${pIdx}`
-                                                                }_monitor_${
-                                                                    mIdx +
-                                                                    1
-                                                                }`;
-
-                                                                const val =
-                                                                    readingForm
-                                                                        .values[
-                                                                        key
-                                                                    ] ??
-                                                                    '';
-
-                                                                return (
-                                                                    <td
-                                                                        key={
-                                                                            mIdx
-                                                                        }
-                                                                        className="text-center"
-                                                                    >
-                                                                        {hasMonitor ? (
-                                                                            readOnly ? (
-                                                                                <span className="value-display-only">
-                                                                                    {val !==
-                                                                                    ''
-                                                                                        ? val
-                                                                                        : '—'}
-                                                                                </span>
-                                                                            ) : (
-                                                                                <input
-                                                                                    type="text"
-                                                                                    className="reading-input"
-                                                                                    value={
-                                                                                        val
-                                                                                    }
-                                                                                    onChange={(
-                                                                                        e
-                                                                                    ) =>
-                                                                                        onValueChange(
-                                                                                            param,
-                                                                                            pIdx,
-                                                                                            mIdx,
-                                                                                            e
-                                                                                                .target
-                                                                                                .value
-                                                                                        )
-                                                                                    }
-                                                                                    placeholder="Saisir..."
-                                                                                />
-                                                                            )
-                                                                        ) : (
-                                                                            <span className="cell-disabled">
-                                                                                —
-                                                                            </span>
-                                                                        )}
-                                                                    </td>
-                                                                );
-                                                            }
-                                                        )}
-
-                                                        <td>
-                                                            {param.tolerance ||
-                                                                '—'}
-                                                        </td>
-
-                                                        <td>
-                                                            <span className="range-badge">
-                                                                {param.normal_min &&
-                                                                param.normal_max
-                                                                    ? `${param.normal_min} – ${param.normal_max}`
-                                                                    : param.normal_min
-                                                                    ? `≥ ${param.normal_min}`
-                                                                    : param.normal_max
-                                                                    ? `≤ ${param.normal_max}`
-                                                                    : '—'}
-                                                            </span>
-                                                        </td>
-                                                    </tr>
-                                                )
-                                            )}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            ) : (
-                                <div className="empty-param-state">
-                                    Aucun paramètre configuré
-                                    dans ce modèle.
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="document-section">
-                            <div className="document-section-title">
-                                <MessageSquare size={16} />
-                                OBSERVATIONS & REMARQUES
-                            </div>
-
-                            <textarea
-                                className="reading-observation"
-                                value={
-                                    readingForm.observation
-                                }
-                                onChange={(e) =>
-                                    onObservationChange(
-                                        e.target.value
-                                    )
-                                }
-                                placeholder={
-                                    readOnly
-                                        ? 'Aucune observation saisie.'
-                                        : 'Saisissez vos observations, anomalies constatées...'
-                                }
-                                rows={3}
-                                readOnly={readOnly}
-                            />
-                        </div>
-
-                        <div className="reading-save-area">
-                            <div className="reading-save-info">
-                                <Info size={18} />
-
-                                <div>
-                                    <strong>
-                                        {readOnly
-                                            ? 'Mode Consultation'
-                                            : correctionMode
-                                            ? 'Mode Correction'
-                                            : 'Enregistrement'}
-                                    </strong>
-
-                                    <span>
-                                        {readOnly
-                                            ? 'Les valeurs affichées correspondent au relevé enregistré.'
-                                            : 'Les données seront soumises au système.'}
-                                    </span>
-                                </div>
-                            </div>
-
-                            <div
-                                style={{
-                                    display: 'flex',
-                                    gap: '0.75rem',
-                                    alignItems: 'center'
-                                }}
-                            >
-                                {readOnly &&
-                                    [
-                                        'valide',
-                                        'validee',
-                                        'terminee'
-                                    ].includes(
-                                        activeReading?.validation_status
-                                    ) && (
-                                        <button
-                                            type="button"
-                                            className="btn-excel-export"
-                                            onClick={() =>
-                                                onExportExcel(
-                                                    activeReading
-                                                )
-                                            }
-                                        >
-                                            <Download size={15} />
-                                            Exporter Excel
-                                        </button>
-                                    )}
-
-                                {!readOnly ? (
-                                    <button
-                                        type="button"
-                                        className="btn-save-reading"
-                                        onClick={onSave}
-                                        disabled={saving}
-                                    >
-                                        {saving ? (
-                                            <Loader2
-                                                size={16}
-                                                className="spin"
-                                            />
-                                        ) : correctionMode ? (
-                                            <RotateCcw size={16} />
-                                        ) : (
-                                            <Save size={16} />
-                                        )}
-
-                                        {saving
-                                            ? 'Enregistrement...'
-                                            : correctionMode
-                                            ? 'Soumettre correction'
-                                            : 'Enregistrer le relevé'}
-                                    </button>
-                                ) : (
-                                    <button
-                                        type="button"
-                                        className="btn-secondary-action"
-                                        onClick={onClose}
-                                    >
-                                        Fermer
-                                    </button>
-                                )}
-                            </div>
+                            </strong>
                         </div>
                     </div>
+
+                    <div className="reading-section">
+                        <div className="reading-section-header">
+                            <div>
+                                <h3>
+                                    <Sliders size={18} />
+                                    Paramètres
+                                </h3>
+
+                                <p>
+                                    Valeurs relevées sur
+                                    l’équipement
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="reading-parameters">
+                            {parameters.length === 0 ? (
+                                <div className="empty-state">
+                                    Aucun paramètre défini
+                                    pour ce relevé.
+                                </div>
+                            ) : (
+                                parameters.map(
+                                    (parameter, index) => {
+                                        const value =
+                                            getParameterReadingValue(
+                                                values,
+                                                parameter
+                                            );
+
+                                        const monitors =
+                                            Array.isArray(
+                                                parameter.monitors
+                                            )
+                                                ? parameter.monitors
+                                                : [];
+
+                                        return (
+                                            <div
+                                                className="reading-parameter-card"
+                                                key={
+                                                    parameter.id ??
+                                                    index
+                                                }
+                                            >
+                                                <div className="parameter-header">
+                                                    <div>
+                                                        <strong>
+                                                            {parameter.name ||
+                                                                parameter.label ||
+                                                                `Paramètre ${index + 1}`}
+                                                        </strong>
+
+                                                        {parameter.unit && (
+                                                            <span>
+                                                                {
+                                                                    parameter.unit
+                                                                }
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
+
+                                                <div className="parameter-input-row">
+                                                    <input
+                                                        type="text"
+                                                        value={
+                                                            value ??
+                                                            ''
+                                                        }
+                                                        disabled={
+                                                            readOnly
+                                                        }
+                                                        onChange={(
+                                                            event
+                                                        ) =>
+                                                            updateValue(
+                                                                parameter,
+                                                                event
+                                                                    .target
+                                                                    .value
+                                                            )
+                                                        }
+                                                        placeholder={
+                                                            readOnly
+                                                                ? 'Aucune valeur'
+                                                                : 'Entrer la valeur'
+                                                        }
+                                                    />
+
+                                                    {parameter.unit && (
+                                                        <span className="input-unit">
+                                                            {
+                                                                parameter.unit
+                                                            }
+                                                        </span>
+                                                    )}
+                                                </div>
+
+                                                {(parameter.normal_min !==
+                                                    undefined ||
+                                                    parameter.normal_max !==
+                                                        undefined ||
+                                                    parameter.tolerance !==
+                                                        undefined) && (
+                                                    <div className="parameter-range">
+                                                        {parameter.normal_min !==
+                                                            undefined &&
+                                                            parameter.normal_max !==
+                                                                undefined && (
+                                                                <span>
+                                                                    Plage normale :
+                                                                    {' '}
+                                                                    {
+                                                                        parameter.normal_min
+                                                                    }
+                                                                    {' '}
+                                                                    –
+                                                                    {' '}
+                                                                    {
+                                                                        parameter.normal_max
+                                                                    }
+                                                                </span>
+                                                            )}
+
+                                                        {parameter.tolerance !==
+                                                            undefined && (
+                                                            <span>
+                                                                Tolérance :
+                                                                {' '}
+                                                                {
+                                                                    parameter.tolerance
+                                                                }
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                )}
+
+                                                {monitors.length > 0 && (
+                                                    <div className="parameter-monitors">
+                                                        <span>
+                                                            Moniteurs :
+                                                        </span>
+
+                                                        {monitors.map(
+                                                            (
+                                                                monitor,
+                                                                monitorIndex
+                                                            ) => (
+                                                                <span
+                                                                    key={
+                                                                        monitorIndex
+                                                                    }
+                                                                    className="monitor-badge"
+                                                                >
+                                                                    {typeof monitor ===
+                                                                    'object'
+                                                                        ? monitor.name ||
+                                                                          monitor.label ||
+                                                                          `Moniteur ${monitorIndex + 1}`
+                                                                        : monitor}
+                                                                </span>
+                                                            )
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    }
+                                )
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="reading-section">
+                        <div className="reading-section-header">
+                            <div>
+                                <h3>
+                                    <MessageSquare size={18} />
+                                    Observations
+                                </h3>
+                            </div>
+                        </div>
+
+                        <textarea
+                            value={form?.observation ?? ''}
+                            disabled={readOnly}
+                            onChange={(event) =>
+                                updateObservation(
+                                    event.target.value
+                                )
+                            }
+                            placeholder={
+                                readOnly
+                                    ? 'Aucune observation'
+                                    : 'Ajouter une observation...'
+                            }
+                            rows={5}
+                        />
+                    </div>
+                </div>
+
+                <div className="reading-modal-footer">
+                    <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={onClose}
+                    >
+                        <X size={17} />
+                        Fermer
+                    </button>
+
+                    <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={exportExcel}
+                        disabled={exporting}
+                    >
+                        {exporting ? (
+                            <Loader2
+                                size={17}
+                                className="spin"
+                            />
+                        ) : (
+                            <Download size={17} />
+                        )}
+
+                        Exporter Excel
+                    </button>
+
+                    {!readOnly && (
+                        <button
+                            type="button"
+                            className="primary-button"
+                            onClick={onSave}
+                            disabled={saving}
+                        >
+                            {saving ? (
+                                <Loader2
+                                    size={17}
+                                    className="spin"
+                                />
+                            ) : (
+                                <Save size={17} />
+                            )}
+
+                            {correctionMode
+                                ? 'Enregistrer les modifications'
+                                : 'Enregistrer le relevé'}
+                        </button>
+                    )}
                 </div>
             </div>
         </div>
     );
 };
 
-/* ==========================================================================
+/* ============================================================
    COMPOSANT PRINCIPAL
-   ========================================================================== */
+============================================================ */
 
 const InterventionDetail = () => {
     const { id } = useParams();
     const navigate = useNavigate();
+
+    /*
+     * ========================================================
+     * AUTHENTIFICATION / RÔLE
+     * ========================================================
+     *
+     * Seul l'Intervenant/ATSEP peut :
+     * - démarrer une intervention
+     * - saisir un relevé
+     * - modifier un relevé
+     * - finaliser une intervention
+     *
+     * Responsable/Admin :
+     * - consultation
+     * - validation via leurs écrans dédiés
+     * - autres opérations autorisées par leur rôle
+     */
+
+    const {
+        user,
+        isIntervenant
+    } = useAuth();
 
     const {
         intervention,
@@ -985,718 +900,196 @@ const InterventionDetail = () => {
         fetchIntervention
     } = useInterventionData(id);
 
-    const [activeTab, setActiveTab] =
-        useState('general');
+    const [activeTab, setActiveTab] = useState('general');
 
-    const [isReadingModalOpen, setIsReadingModalOpen] =
-        useState(false);
+    const [
+        isReadingModalOpen,
+        setIsReadingModalOpen
+    ] = useState(false);
 
-    const [savingReading, setSavingReading] =
-        useState(false);
+    const [
+        savingReading,
+        setSavingReading
+    ] = useState(false);
 
-    const [startingIntervention, setStartingIntervention] =
-        useState(false);
+    const [
+        startingIntervention,
+        setStartingIntervention
+    ] = useState(false);
 
-    const [completingIntervention, setCompletingIntervention] =
-        useState(false);
+    const [
+        completingIntervention,
+        setCompletingIntervention
+    ] = useState(false);
 
-    const [correctionMode, setCorrectionMode] =
-        useState(false);
+    const [
+        correctionMode,
+        setCorrectionMode
+    ] = useState(false);
 
-    const [readOnlyReading, setReadOnlyReading] =
-        useState(false);
+    const [
+        readOnlyReading,
+        setReadOnlyReading
+    ] = useState(false);
 
-    const [selectedReading, setSelectedReading] =
-        useState(null);
+    const [
+        selectedReading,
+        setSelectedReading
+    ] = useState(null);
 
-    const [readingForm, setReadingForm] = useState({
+    const [
+        readingForm,
+        setReadingForm
+    ] = useState({
         values: {},
         observation: '',
         annexes: []
     });
 
+    /* ========================================================
+       DONNÉES DU TEMPLATE
+    ======================================================== */
+
     const assignedCanvas =
         intervention?.template || null;
 
     const normalizedParameters = useMemo(() => {
-        let params = assignedCanvas?.parameters;
+        if (!assignedCanvas) return [];
 
-        if (!params) return [];
+        let parameters =
+            assignedCanvas.parameters ??
+            assignedCanvas.reading_parameters ??
+            assignedCanvas.fields ??
+            [];
 
-        if (typeof params === 'string') {
+        if (typeof parameters === 'string') {
             try {
-                params = JSON.parse(params);
-            } catch (e) {
-                return [];
+                parameters = JSON.parse(parameters);
+            } catch {
+                parameters = [];
             }
         }
 
-        if (
-            params &&
-            !Array.isArray(params) &&
-            typeof params === 'object' &&
-            Array.isArray(params.parameters)
-        ) {
-            params = params.parameters;
+        if (!Array.isArray(parameters)) {
+            return [];
         }
 
-        if (!Array.isArray(params)) return [];
+        return parameters.map((parameter, index) => ({
+            ...parameter,
 
-        return params
-            .map((parameter, index) => {
-                if (!parameter) return null;
+            id:
+                parameter.id ??
+                parameter.parameter_id ??
+                parameter.key ??
+                index,
 
-                if (typeof parameter !== 'object') {
-                    return {
-                        id: `parameter-${index}`,
-                        name: String(parameter),
-                        unit: '',
-                        monitors: 1,
-                        tolerance: '',
-                        normal_min: '',
-                        normal_max: ''
-                    };
-                }
+            name:
+                parameter.name ??
+                parameter.label ??
+                parameter.parameter_name ??
+                `Paramètre ${index + 1}`,
 
-                return {
-                    id:
-                        parameter.id ??
-                        parameter.key ??
-                        `parameter-${index}`,
+            unit:
+                parameter.unit ??
+                parameter.unity ??
+                '',
 
-                    name:
-                        parameter.name ||
-                        parameter.parameter ||
-                        parameter.label ||
-                        `Paramètre ${index + 1}`,
+            monitors:
+                Array.isArray(parameter.monitors)
+                    ? parameter.monitors
+                    : [],
 
-                    unit:
-                        parameter.unit ||
-                        parameter.unite ||
-                        '',
+            tolerance:
+                parameter.tolerance ??
+                parameter.allowed_tolerance ??
+                undefined,
 
-                    monitors: Math.max(
-                        Number(
-                            parameter.monitors ??
-                                parameter.monitor_count ??
-                                parameter.nb_monitors
-                        ) || 1,
-                        1
-                    ),
+            normal_min:
+                parameter.normal_min ??
+                parameter.min ??
+                undefined,
 
-                    tolerance:
-                        parameter.tolerance || '',
-
-                    normal_min:
-                        parameter.normal_min ??
-                        parameter.normalMin ??
-                        '',
-
-                    normal_max:
-                        parameter.normal_max ??
-                        parameter.normalMax ??
-                        ''
-                };
-            })
-            .filter(Boolean);
+            normal_max:
+                parameter.normal_max ??
+                parameter.max ??
+                undefined
+        }));
     }, [assignedCanvas]);
 
     const monitorCount = useMemo(() => {
-        if (normalizedParameters.length === 0) {
-            return 1;
-        }
-
-        return Math.max(
-            ...normalizedParameters.map(
-                (p) => Number(p.monitors) || 1
-            )
+        return normalizedParameters.reduce(
+            (maximum, parameter) =>
+                Math.max(
+                    maximum,
+                    Array.isArray(parameter.monitors)
+                        ? parameter.monitors.length
+                        : 0
+                ),
+            0
         );
     }, [normalizedParameters]);
 
-    const visibleReadings = useMemo(() => {
-        if (!Array.isArray(readings)) return [];
+    /* ========================================================
+       RELEVÉS VISIBLES
+    ======================================================== */
 
-        return readings.filter(
-            (r) =>
-                r?.validation_status !==
-                    'brouillon' ||
-                readingHasValues(r)
-        );
+    const visibleReadings = useMemo(() => {
+        return readings.filter((reading) => {
+            return readingHasValues(reading) ||
+                reading.observation ||
+                reading.observations ||
+                reading.validation_status;
+        });
     }, [readings]);
 
     const latestReading = useMemo(() => {
-        if (
-            !Array.isArray(visibleReadings) ||
-            visibleReadings.length === 0
-        ) {
+        if (visibleReadings.length === 0) {
             return null;
         }
 
-        return [...visibleReadings].sort(
-            (a, b) =>
-                getReadingTime(b) -
-                getReadingTime(a)
-        )[0];
+        return [...visibleReadings].sort((a, b) => {
+            const dateA = new Date(
+                getReadingTime(a) || 0
+            ).getTime();
+
+            const dateB = new Date(
+                getReadingTime(b) || 0
+            ).getTime();
+
+            return dateB - dateA;
+        })[0];
     }, [visibleReadings]);
 
-    useEffect(() => {
-        const handleEscape = (e) => {
-            if (e.key === 'Escape') {
-                setIsReadingModalOpen(false);
-                setCorrectionMode(false);
-                setReadOnlyReading(false);
-            }
-        };
-
-        if (isReadingModalOpen) {
-            document.addEventListener(
-                'keydown',
-                handleEscape
-            );
-
-            document.body.style.overflow = 'hidden';
-        }
-
-        return () => {
-            document.removeEventListener(
-                'keydown',
-                handleEscape
-            );
-
-            document.body.style.overflow = '';
-        };
-    }, [isReadingModalOpen]);
-
-    const equipmentName = useMemo(
-        () =>
-            intervention?.equipment?.name ||
-            intervention?.equipment?.nom ||
-            `Équipement #${
-                intervention?.equipment_id || '—'
-            }`,
-        [intervention]
-    );
-
-    const groupName = useMemo(
-        () =>
-            intervention?.group?.name ||
-            intervention?.group?.nom ||
-            'Non affecté',
-        [intervention]
-    );
-
-    const userName = useMemo(() => {
-        const u = intervention?.user;
-
-        if (!u) return 'Non assigné';
-
-        return (
-            u.name ||
-            `${u.first_name || ''} ${
-                u.last_name || ''
-            }`.trim() ||
-            u.email
-        );
-    }, [intervention]);
-
-    const handleReadingChange = (
-        param,
-        pIdx,
-        mIdx,
-        val
-    ) => {
-        const key = `${
-            param.id ||
-            `parameter-${pIdx}`
-        }_monitor_${mIdx + 1}`;
-
-        setReadingForm((prev) => ({
-            ...prev,
-            values: {
-                ...prev.values,
-                [key]: val
-            }
-        }));
-    };
-
-    const handleObservationChange = (val) => {
-        setReadingForm((prev) => ({
-            ...prev,
-            observation: val
-        }));
-    };
-
-    /* ==========================================================================
-       EXPORT EXCEL
-       ========================================================================== */
-
-    const exportReadingToExcel = (
-        readingToExport
-    ) => {
-        if (!readingToExport) {
-            toast.error(
-                'Aucun relevé à exporter.'
-            );
-            return;
-        }
-
-        const dateSaisie = formatDateTime(
-            readingToExport.taken_at ||
-                readingToExport.created_at
-        );
-
-        const dateValidation = formatDateTime(
-            readingToExport.validated_at
-        );
-
-        const staticValues =
-            normalizeReadingValues(
-                readingToExport.values
-            );
-
-        const excelData = [
-            ['RAPPORT DE RELEVÉ DE MAINTENANCE'],
-            [''],
-            ['RÉFÉRENCE & ÉQUIPEMENT'],
-            [
-                'Intervention ID',
-                `#${intervention.id}`
-            ],
-            ['Équipement', equipmentName],
-            [
-                "Type d'équipement",
-                intervention.equipment?.type ||
-                    '—'
-            ],
-            [
-                'Aéroport',
-                assignedCanvas?.header?.aeroport ||
-                    'FES SAISS'
-            ],
-            ['Groupe', groupName],
-            [
-                'Technicien / Intervenant',
-                userName
-            ],
-            [''],
-            ['DÉTAILS DU RELEVÉ'],
-            [
-                'Modèle de relevé',
-                assignedCanvas?.template_name ||
-                    '—'
-            ],
-            [
-                'Fréquence',
-                assignedCanvas?.frequency ||
-                    '—'
-            ],
-            [
-                'Date de réalisation',
-                dateSaisie
-            ],
-            [
-                'Statut de validation',
-                readingToExport.validation_status ||
-                    'Validé'
-            ],
-            [
-                'Date de validation',
-                dateValidation
-            ],
-            [
-                'Remarque responsable',
-                readingToExport.validation_commentaire ||
-                    '—'
-            ],
-            [
-                'Observations technicien',
-                readingToExport.commentaire ||
-                    readingToExport.observation ||
-                    '—'
-            ],
-            [''],
-            ['MESURES ET PARAMÈTRES']
-        ];
-
-        const headers = [
-            'Paramètre',
-            'Unité'
-        ];
-
-        for (
-            let i = 1;
-            i <= monitorCount;
-            i++
-        ) {
-            headers.push(
-                `Moniteur ${i}`
-            );
-        }
-
-        headers.push(
-            'Tolérance',
-            'Plage normale'
-        );
-
-        excelData.push(headers);
-
-        normalizedParameters.forEach(
-            (param, pIdx) => {
-                const row = [
-                    param.name,
-                    param.unit || '—'
-                ];
-
-                for (
-                    let mIdx = 0;
-                    mIdx < monitorCount;
-                    mIdx++
-                ) {
-                    const hasMonitor =
-                        mIdx < param.monitors;
-
-                    if (hasMonitor) {
-                        const val =
-                            getParameterReadingValue(
-                                staticValues,
-                                param,
-                                pIdx,
-                                mIdx
-                            );
-
-                        row.push(
-                            val !== '' &&
-                                val !== undefined
-                                ? val
-                                : '—'
-                        );
-                    } else {
-                        row.push('N/A');
-                    }
-                }
-
-                row.push(
-                    param.tolerance || '—'
-                );
-
-                const range =
-                    param.normal_min &&
-                    param.normal_max
-                        ? `${param.normal_min} – ${param.normal_max}`
-                        : param.normal_min
-                        ? `≥ ${param.normal_min}`
-                        : param.normal_max
-                        ? `≤ ${param.normal_max}`
-                        : '—';
-
-                row.push(range);
-
-                excelData.push(row);
-            }
-        );
-
-        const worksheet =
-            XLSX.utils.aoa_to_sheet(
-                excelData
-            );
-
-        worksheet['!cols'] = [
-            { wch: 30 },
-            { wch: 12 },
-            ...Array(monitorCount).fill({
-                wch: 15
-            }),
-            { wch: 15 },
-            { wch: 20 }
-        ];
-
-        const workbook =
-            XLSX.utils.book_new();
-
-        XLSX.utils.book_append_sheet(
-            workbook,
-            worksheet,
-            'Relevé'
-        );
-
-        const fileName = `Releve_Intervention_${
-            intervention.id
-        }_${equipmentName.replace(
-            /[^a-zA-Z0-9]/g,
-            '_'
-        )}.xlsx`;
-
-        XLSX.writeFile(
-            workbook,
-            fileName
-        );
-
-        toast.success(
-            'Export Excel généré avec succès !'
-        );
-    };
-
-    /* ==========================================================================
-       ACTIONS MODALE
-       ========================================================================== */
-
-    const openNewReading = () => {
-        setCorrectionMode(false);
-        setReadOnlyReading(false);
-        setSelectedReading(null);
-
-        setReadingForm({
-            values: {},
-            observation: '',
-            annexes: []
-        });
-
-        setIsReadingModalOpen(true);
-    };
-
-    const openCorrectionReading = () => {
-        setCorrectionMode(true);
-        setReadOnlyReading(false);
-
-        if (latestReading) {
-            setSelectedReading(
-                latestReading
-            );
-
-            setReadingForm(
-                buildReadingFormFromReading(
-                    latestReading,
-                    normalizedParameters
-                )
-            );
-        }
-
-        setIsReadingModalOpen(true);
-    };
-
-    const openReadingReadOnly = (
-        targetReading = latestReading
-    ) => {
-        if (targetReading) {
-            setSelectedReading(
-                targetReading
-            );
-
-            setReadingForm(
-                buildReadingFormFromReading(
-                    targetReading,
-                    normalizedParameters
-                )
-            );
-        }
-
-        setCorrectionMode(false);
-        setReadOnlyReading(true);
-        setIsReadingModalOpen(true);
-    };
-
-    /* ==========================================================================
-       DÉMARRER INTERVENTION
-       ========================================================================== */
-
-    const handleStartIntervention =
-        async () => {
-            try {
-                setStartingIntervention(true);
-
-                await api.post(
-                    `/interventions/${id}/start`
-                );
-
-                toast.success(
-                    'Intervention démarrée.'
-                );
-
-                await fetchIntervention();
-            } catch (error) {
-                toast.error(
-                    error.response?.data
-                        ?.message ||
-                        'Erreur au démarrage.'
-                );
-            } finally {
-                setStartingIntervention(
-                    false
-                );
-            }
-        };
-
-    /* ==========================================================================
-       SAUVEGARDER RELEVÉ
-       ========================================================================== */
-
-    const handleSaveReading = async () => {
-        try {
-            setSavingReading(true);
-
-            const templateId =
-                intervention.template_id ||
-                assignedCanvas.id;
-
-            const payload = {
-                template_id: templateId,
-                canvas_id: templateId,
-                values:
-                    normalizeReadingValues(
-                        readingForm.values
-                    ),
-                commentaire:
-                    readingForm.observation,
-                taken_at:
-                    new Date().toISOString()
-            };
-
-            await api.post(
-                `/interventions/${id}/readings`,
-                payload
-            );
-
-            toast.success(
-                'Relevé sauvegardé.'
-            );
-
-            setIsReadingModalOpen(false);
-
-            await fetchIntervention();
-        } catch (error) {
-            toast.error(
-                error.response?.data
-                    ?.message ||
-                    'Erreur de sauvegarde.'
-            );
-        } finally {
-            setSavingReading(false);
-        }
-    };
-
-    /* ==========================================================================
-       FINALISER INTERVENTION
-       ========================================================================== */
-
-    const handleCompleteIntervention =
-        async () => {
-            try {
-                setCompletingIntervention(
-                    true
-                );
-
-                await api.post(
-                    `/interventions/${id}/complete`,
-                    {
-                        diagnostic:
-                            intervention.diagnostic ||
-                            '',
-                        actions:
-                            intervention.actions ||
-                            '',
-                        observations:
-                            intervention.observations ||
-                            ''
-                    }
-                );
-
-                toast.success(
-                    'Intervention finalisée.'
-                );
-
-                await fetchIntervention();
-            } catch (error) {
-                toast.error(
-                    error.response?.data
-                        ?.message ||
-                        'Erreur de finalisation.'
-                );
-            } finally {
-                setCompletingIntervention(
-                    false
-                );
-            }
-        };
-
-    /* ==========================================================================
-       LOADING
-       ========================================================================== */
-
-    if (loading) {
-        return (
-            <div className="intervention-detail loader-state">
-                <Loader2
-                    size={36}
-                    className="spin text-blue"
-                />
-
-                <p>
-                    Chargement de la fiche
-                    d'intervention...
-                </p>
-            </div>
-        );
-    }
-
-    if (!intervention) {
-        return (
-            <div className="intervention-detail loader-state">
-                <AlertCircle
-                    size={48}
-                    className="text-red"
-                />
-
-                <h2>
-                    Intervention introuvable
-                </h2>
-
-                <button
-                    type="button"
-                    className="btn-secondary-action"
-                    onClick={() =>
-                        navigate(-1)
-                    }
-                >
-                    <ArrowLeft size={16} />
-                    Retour à la liste
-                </button>
-            </div>
-        );
-    }
-
-    /* ==========================================================================
-       STATUTS
-       ========================================================================== */
-
-    const rawStatus =
-        intervention.status;
+    /* ========================================================
+       STATUT
+    ======================================================== */
+
+    const rawStatus = intervention?.status;
+
+    /*
+     * Le backend peut envoyer display_state = en_retard
+     * alors que status reste en_attente.
+     *
+     * On privilégie donc display_state lorsqu'il existe.
+     */
+    const effectiveStatus =
+        intervention?.display_state ||
+        rawStatus;
 
     const currentStatus =
-        normalizeStatus(rawStatus);
+        normalizeStatus(effectiveStatus);
 
     const statusConfig =
-        getStatusConfig(
-            currentStatus
-        );
+        getStatusConfig(currentStatus);
 
     const StatusIcon =
         statusConfig.icon;
 
     const priorityConfig =
         getPriorityConfig(
-            intervention.priority
+            intervention?.priority
         );
 
-    /*
-     * IMPORTANT :
-     *
-     * Une intervention peut être démarrée lorsqu'elle est :
-     * - planifiée
-     * - en attente
-     * - en retard
-     *
-     * Le statut "en_retard" reste donc démarrable.
-     */
     const isPending = [
         'en_attente',
         'planifiee',
@@ -1718,89 +1111,549 @@ const InterventionDetail = () => {
             'rejetee',
             'modifications_demandees',
             'valide'
-        ].includes(
-            latestReadingStatus
+        ].includes(latestReadingStatus);
+
+    /* ========================================================
+       AUTORISATIONS FRONTEND
+    ======================================================== */
+
+    const canStartIntervention =
+        Boolean(isIntervenant) &&
+        isPending;
+
+    const canEnterReading =
+        Boolean(isIntervenant) &&
+        isInProgress &&
+        Boolean(assignedCanvas);
+
+    const canEditReading =
+        Boolean(isIntervenant) &&
+        canCorrectReading;
+
+    const canCompleteIntervention =
+        Boolean(isIntervenant) &&
+        isInProgress;
+
+    /* ========================================================
+       OUVRIR NOUVEAU RELEVÉ
+    ======================================================== */
+
+    const openNewReading = () => {
+        if (!isIntervenant) {
+            toast.error(
+                'Seul un Intervenant/ATSEP peut saisir un relevé.'
+            );
+            return;
+        }
+
+        if (!isInProgress) {
+            toast.error(
+                'L’intervention doit être en cours.'
+            );
+            return;
+        }
+
+        if (!assignedCanvas) {
+            toast.error(
+                'Aucun formulaire de relevé n’est associé à cette intervention.'
+            );
+            return;
+        }
+
+        setSelectedReading(null);
+
+        setReadingForm({
+            values: {},
+            observation: '',
+            annexes: []
+        });
+
+        setCorrectionMode(false);
+        setReadOnlyReading(false);
+        setIsReadingModalOpen(true);
+    };
+
+    /* ========================================================
+       MODIFIER RELEVÉ
+    ======================================================== */
+
+    const openCorrectionReading = () => {
+        if (!isIntervenant) {
+            toast.error(
+                'Seul un Intervenant/ATSEP peut modifier un relevé.'
+            );
+            return;
+        }
+
+        if (!latestReading) {
+            toast.error(
+                'Aucun relevé disponible.'
+            );
+            return;
+        }
+
+        setSelectedReading(latestReading);
+
+        setReadingForm(
+            buildReadingFormFromReading(
+                latestReading
+            )
         );
 
+        setCorrectionMode(true);
+        setReadOnlyReading(false);
+        setIsReadingModalOpen(true);
+    };
+
+    /* ========================================================
+       CONSULTER RELEVÉ
+    ======================================================== */
+
+    const openReadingReadOnly = (reading) => {
+        setSelectedReading(reading);
+
+        setReadingForm(
+            buildReadingFormFromReading(
+                reading
+            )
+        );
+
+        setCorrectionMode(false);
+        setReadOnlyReading(true);
+        setIsReadingModalOpen(true);
+    };
+
+    /* ========================================================
+       DÉMARRER INTERVENTION
+    ======================================================== */
+
+    const handleStartIntervention = async () => {
+        if (!isIntervenant) {
+            toast.error(
+                'Seul un Intervenant/ATSEP peut démarrer une intervention.'
+            );
+            return;
+        }
+
+        if (!isPending) {
+            toast.error(
+                'Cette intervention ne peut pas être démarrée dans son état actuel.'
+            );
+            return;
+        }
+
+        try {
+            setStartingIntervention(true);
+
+            await api.post(
+                `/interventions/${id}/start`
+            );
+
+            toast.success(
+                'Intervention démarrée avec succès.'
+            );
+
+            await fetchIntervention(true);
+        } catch (error) {
+            console.error(
+                'Erreur démarrage intervention :',
+                error
+            );
+
+            toast.error(
+                error.response?.data?.message ||
+                'Impossible de démarrer l’intervention.'
+            );
+        } finally {
+            setStartingIntervention(false);
+        }
+    };
+
+    /* ========================================================
+       ENREGISTRER RELEVÉ
+    ======================================================== */
+
+    const handleSaveReading = async () => {
+        if (!isIntervenant) {
+            toast.error(
+                'Seul un Intervenant/ATSEP peut enregistrer un relevé.'
+            );
+            return;
+        }
+
+        if (!isInProgress) {
+            toast.error(
+                'L’intervention doit être en cours pour saisir un relevé.'
+            );
+            return;
+        }
+
+        try {
+            setSavingReading(true);
+
+            const payload = {
+                values:
+                    readingForm.values ?? {},
+
+                observation:
+                    readingForm.observation ?? '',
+
+                annexes:
+                    readingForm.annexes ?? []
+            };
+
+            /*
+             * En correction, on met à jour le relevé existant
+             * si l'API le permet.
+             *
+             * Sinon, on crée un nouveau relevé.
+             */
+            if (
+                correctionMode &&
+                selectedReading?.id
+            ) {
+                await api.put(
+                    `/interventions/${id}/readings/${selectedReading.id}`,
+                    payload
+                );
+            } else {
+                await api.post(
+                    `/interventions/${id}/readings`,
+                    payload
+                );
+            }
+
+            toast.success(
+                correctionMode
+                    ? 'Relevé modifié avec succès.'
+                    : 'Relevé enregistré avec succès.'
+            );
+
+            setIsReadingModalOpen(false);
+            setSelectedReading(null);
+            setCorrectionMode(false);
+            setReadOnlyReading(false);
+
+            setReadingForm({
+                values: {},
+                observation: '',
+                annexes: []
+            });
+
+            await fetchIntervention(true);
+        } catch (error) {
+            console.error(
+                'Erreur sauvegarde relevé :',
+                error
+            );
+
+            toast.error(
+                error.response?.data?.message ||
+                'Impossible d’enregistrer le relevé.'
+            );
+        } finally {
+            setSavingReading(false);
+        }
+    };
+
+    /* ========================================================
+       FINALISER INTERVENTION
+    ======================================================== */
+
+    const handleCompleteIntervention = async () => {
+        if (!isIntervenant) {
+            toast.error(
+                'Seul un Intervenant/ATSEP peut finaliser une intervention.'
+            );
+            return;
+        }
+
+        if (!isInProgress) {
+            toast.error(
+                'Cette intervention n’est pas en cours.'
+            );
+            return;
+        }
+
+        const confirmed = window.confirm(
+            'Voulez-vous vraiment finaliser cette intervention ?'
+        );
+
+        if (!confirmed) {
+            return;
+        }
+
+        try {
+            setCompletingIntervention(true);
+
+            await api.post(
+                `/interventions/${id}/complete`
+            );
+
+            toast.success(
+                'Intervention finalisée avec succès.'
+            );
+
+            await fetchIntervention(true);
+        } catch (error) {
+            console.error(
+                'Erreur finalisation intervention :',
+                error
+            );
+
+            toast.error(
+                error.response?.data?.message ||
+                'Impossible de finaliser l’intervention.'
+            );
+        } finally {
+            setCompletingIntervention(false);
+        }
+    };
+
+    /* ========================================================
+       EXPORT RELEVÉ
+    ======================================================== */
+
+    const exportReadingExcel = (reading) => {
+        try {
+            const values =
+                buildFormValuesFromReading(
+                    reading
+                );
+
+            const rows =
+                normalizedParameters.map(
+                    (parameter) => ({
+                        Paramètre:
+                            parameter.name,
+
+                        Unité:
+                            parameter.unit ||
+                            '—',
+
+                        Valeur:
+                            getParameterReadingValue(
+                                values,
+                                parameter
+                            ) ?? '—'
+                    })
+                );
+
+            const observation =
+                reading?.observation ??
+                reading?.observations ??
+                '';
+
+            if (observation) {
+                rows.push({
+                    Paramètre:
+                        'Observations',
+
+                    Unité:
+                        '',
+
+                    Valeur:
+                        observation
+                });
+            }
+
+            const worksheet =
+                XLSX.utils.json_to_sheet(
+                    rows
+                );
+
+            const workbook =
+                XLSX.utils.book_new();
+
+            XLSX.utils.book_append_sheet(
+                workbook,
+                worksheet,
+                'Relevé'
+            );
+
+            XLSX.writeFile(
+                workbook,
+                `releve-${reading?.id ?? 'export'}.xlsx`
+            );
+
+            toast.success(
+                'Relevé exporté avec succès.'
+            );
+        } catch (error) {
+            console.error(error);
+
+            toast.error(
+                'Erreur lors de l’export Excel.'
+            );
+        }
+    };
+
+    /* ========================================================
+       CHARGEMENT
+    ======================================================== */
+
+    if (loading) {
+        return (
+            <div className="intervention-detail-page">
+                <div className="loading-state">
+                    <Loader2
+                        size={40}
+                        className="spin"
+                    />
+
+                    <p>
+                        Chargement de l’intervention...
+                    </p>
+                </div>
+            </div>
+        );
+    }
+
+    if (!intervention) {
+        return (
+            <div className="intervention-detail-page">
+                <div className="empty-state">
+                    <AlertCircle size={40} />
+
+                    <h2>
+                        Intervention introuvable
+                    </h2>
+
+                    <p>
+                        Cette intervention n’existe pas
+                        ou n’est plus disponible.
+                    </p>
+
+                    <button
+                        type="button"
+                        className="primary-button"
+                        onClick={() =>
+                            navigate(
+                                '/interventions'
+                            )
+                        }
+                    >
+                        <ArrowLeft size={17} />
+                        Retour aux interventions
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    /* ========================================================
+       DONNÉES AFFICHAGE
+    ======================================================== */
+
+    const equipment =
+        intervention.equipment;
+
+    const assignedUser =
+        intervention.assigned_user ??
+        intervention.intervenant ??
+        intervention.user;
+
+    const group =
+        intervention.group ??
+        intervention.assigned_group;
+
+    const scheduledDate =
+        intervention.scheduled_date ??
+        intervention.planned_date ??
+        intervention.date;
+
+    const scheduledStart =
+        intervention.scheduled_start_time ??
+        intervention.start_time ??
+        intervention.scheduled_time;
+
+    const scheduledEnd =
+        intervention.scheduled_end_time ??
+        intervention.end_time;
+
     return (
-        <div className="intervention-detail">
+        <div className="intervention-detail-page">
 
-            {/* HEADER */}
+            {/* ==================================================
+                HEADER
+            ================================================== */}
 
-            <header className="detail-header">
+            <div className="intervention-detail-header">
+
                 <div className="header-left">
 
                     <button
                         type="button"
                         className="back-button"
                         onClick={() =>
-                            navigate(-1)
+                            navigate(
+                                '/interventions'
+                            )
                         }
-                        title="Retour"
                     >
-                        <ArrowLeft size={18} />
+                        <ArrowLeft size={19} />
                     </button>
 
-                    <div>
-                        <div className="page-breadcrumbs">
+                    <div className="header-title-area">
+
+                        <div className="breadcrumb">
                             <span>
                                 Interventions
                             </span>
 
                             <ChevronRight
-                                size={12}
+                                size={15}
                             />
 
                             <span>
-                                Détail #
-                                {intervention.id}
+                                #{intervention.id}
                             </span>
                         </div>
 
                         <h1>
-                            Fiche d'Intervention #
+                            Intervention #
                             {intervention.id}
                         </h1>
+
+                        <p>
+                            {equipment?.name ||
+                                intervention.equipment_name ||
+                                'Équipement non renseigné'}
+                        </p>
                     </div>
                 </div>
 
                 <div className="header-actions">
 
-                    <span
-                        className={`status-badge ${statusConfig.class}`}
-                    >
-                        <StatusIcon size={14} />
-                        {statusConfig.label}
-                    </span>
-
                     <button
                         type="button"
-                        className="btn-refresh"
+                        className="secondary-button"
                         onClick={() =>
-                            fetchIntervention(
-                                true
-                            )
+                            fetchIntervention(true)
                         }
                         disabled={refreshing}
                     >
                         <RefreshCw
-                            size={14}
+                            size={17}
                             className={
                                 refreshing
                                     ? 'spin'
                                     : ''
                             }
                         />
+
+                        Actualiser
                     </button>
 
-                    {/* ======================================================
-                        BOUTON DÉMARRER
-                        ====================================================== */}
+                    {/* =========================================
+                        DÉMARRER
+                        UNIQUEMENT INTERVENANT
+                    ========================================= */}
 
-                    {isPending && (
+                    {canStartIntervention && (
                         <button
                             type="button"
-                            className="btn-primary-action"
+                            className="primary-button"
                             onClick={
                                 handleStartIntervention
                             }
@@ -1810,12 +1663,12 @@ const InterventionDetail = () => {
                         >
                             {startingIntervention ? (
                                 <Loader2
-                                    size={15}
+                                    size={17}
                                     className="spin"
                                 />
                             ) : (
                                 <PlayCircle
-                                    size={15}
+                                    size={17}
                                 />
                             )}
 
@@ -1823,26 +1676,36 @@ const InterventionDetail = () => {
                         </button>
                     )}
 
-                    {isInProgress &&
-                        assignedCanvas && (
-                            <button
-                                type="button"
-                                className="btn-secondary-action"
-                                onClick={
-                                    openNewReading
-                                }
-                            >
-                                <ClipboardList
-                                    size={15}
-                                />
-                                Saisir Relevé
-                            </button>
-                        )}
+                    {/* =========================================
+                        SAISIR RELEVÉ
+                        UNIQUEMENT INTERVENANT
+                    ========================================= */}
 
-                    {isInProgress && (
+                    {canEnterReading && (
                         <button
                             type="button"
-                            className="btn-success-action"
+                            className="primary-button"
+                            onClick={
+                                openNewReading
+                            }
+                        >
+                            <ClipboardList
+                                size={17}
+                            />
+
+                            Saisir Relevé
+                        </button>
+                    )}
+
+                    {/* =========================================
+                        FINALISER
+                        UNIQUEMENT INTERVENANT
+                    ========================================= */}
+
+                    {canCompleteIntervention && (
+                        <button
+                            type="button"
+                            className="primary-button"
                             onClick={
                                 handleCompleteIntervention
                             }
@@ -1852,12 +1715,12 @@ const InterventionDetail = () => {
                         >
                             {completingIntervention ? (
                                 <Loader2
-                                    size={15}
+                                    size={17}
                                     className="spin"
                                 />
                             ) : (
                                 <CheckCircle2
-                                    size={15}
+                                    size={17}
                                 />
                             )}
 
@@ -1865,708 +1728,954 @@ const InterventionDetail = () => {
                         </button>
                     )}
 
+                    {/* =========================================
+                        MODIFIER INTERVENTION
+                    ========================================= */}
+
                     <button
                         type="button"
-                        className="btn-edit"
+                        className="secondary-button"
                         onClick={() =>
                             navigate(
                                 `/interventions/${intervention.id}/edit`
                             )
                         }
                     >
-                        <Wrench size={14} />
+                        <Wrench size={17} />
                         Modifier
                     </button>
                 </div>
-            </header>
+            </div>
 
-            {/* KPI BAR */}
+            {/* ==================================================
+                BANDEAU INFORMATIONS
+            ================================================== */}
 
-            <div className="detail-summary-bar">
+            <div className="intervention-summary">
 
-                <div className="summary-pill">
-                    <div className="pill-icon">
-                        <Wrench size={18} />
+                <div className="summary-status">
+
+                    <div
+                        className={`status-badge ${statusConfig.className}`}
+                    >
+                        <StatusIcon size={17} />
+
+                        {statusConfig.label}
                     </div>
 
-                    <div>
-                        <span>
-                            Équipement
-                        </span>
-
-                        <strong>
-                            {equipmentName}
-                        </strong>
+                    <div
+                        className={`priority-badge ${priorityConfig.className}`}
+                    >
+                        {priorityConfig.label}
                     </div>
                 </div>
 
-                <div className="summary-divider" />
+                <div className="summary-info">
 
-                <div className="summary-pill">
-                    <div className="pill-icon">
+                    <div className="summary-item">
                         <Calendar size={18} />
+
+                        <div>
+                            <span>
+                                Date prévue
+                            </span>
+
+                            <strong>
+                                {formatDate(
+                                    scheduledDate
+                                )}
+                            </strong>
+                        </div>
                     </div>
 
-                    <div>
-                        <span>
-                            Date prévue
-                        </span>
-
-                        <strong>
-                            {formatDate(
-                                intervention.scheduled_date
-                            )}
-                        </strong>
-                    </div>
-                </div>
-
-                <div className="summary-divider" />
-
-                <div className="summary-pill">
-                    <div className="pill-icon">
+                    <div className="summary-item">
                         <Clock size={18} />
+
+                        <div>
+                            <span>
+                                Horaire
+                            </span>
+
+                            <strong>
+                                {scheduledStart ||
+                                    '—'}
+
+                                {scheduledEnd
+                                    ? ` - ${scheduledEnd}`
+                                    : ''}
+                            </strong>
+                        </div>
                     </div>
 
-                    <div>
-                        <span>
-                            Heure
-                        </span>
+                    <div className="summary-item">
+                        <User size={18} />
 
+                        <div>
+                            <span>
+                                Intervenant
+                            </span>
+
+                            <strong>
+                                {assignedUser?.name ||
+                                    assignedUser?.full_name ||
+                                    assignedUser?.email ||
+                                    'Non assigné'}
+                            </strong>
+                        </div>
+                    </div>
+
+                    <div className="summary-item">
+                        <Building2 size={18} />
+
+                        <div>
+                            <span>
+                                Groupe
+                            </span>
+
+                            <strong>
+                                {group?.name ||
+                                    intervention.group_name ||
+                                    'Non assigné'}
+                            </strong>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* ==================================================
+                INFORMATION RÔLE
+            ================================================== */}
+
+            {!isIntervenant && (
+                <div className="role-information-banner">
+                    <ShieldAlert size={19} />
+
+                    <div>
                         <strong>
-                            {intervention.scheduled_time ||
-                                '—'}
+                            Mode consultation
                         </strong>
-                    </div>
-                </div>
 
-                <div className="summary-divider" />
-
-                <div className="summary-pill">
-                    <div className="pill-icon">
-                        <ShieldAlert
-                            size={18}
-                        />
-                    </div>
-
-                    <div>
                         <span>
-                            Priorité
+                            Votre rôle (
+                            {user?.role ||
+                                'non défini'}
+                            ) ne permet pas de démarrer,
+                            saisir ou finaliser cette
+                            intervention.
                         </span>
-
-                        <strong
-                            className={`priority-tag ${priorityConfig.class}`}
-                        >
-                            {
-                                priorityConfig.label
-                            }
-                        </strong>
                     </div>
-                </div>
-            </div>
-
-            {/* NAVIGATION TABS */}
-
-            <div className="navigation-tabs">
-
-                <button
-                    className={`tab-btn ${
-                        activeTab === 'general'
-                            ? 'active'
-                            : ''
-                    }`}
-                    onClick={() =>
-                        setActiveTab(
-                            'general'
-                        )
-                    }
-                >
-                    <Info size={16} />
-                    Informations Générales
-                </button>
-
-                <button
-                    className={`tab-btn ${
-                        activeTab ===
-                        'readings'
-                            ? 'active'
-                            : ''
-                    }`}
-                    onClick={() =>
-                        setActiveTab(
-                            'readings'
-                        )
-                    }
-                >
-                    <FileText size={16} />
-                    Relevé & Historique (
-                    {visibleReadings.length})
-                </button>
-            </div>
-
-            {/* ==============================================================
-                TAB 1 : INFORMATIONS GENERALES
-                ============================================================== */}
-
-            {activeTab === 'general' && (
-                <div className="tab-content-grid">
-
-                    <div className="detail-grid-compact">
-
-                        <div className="detail-card-section">
-                            <div className="card-section-header">
-                                <div className="card-section-title">
-                                    <Building2
-                                        size={18}
-                                    />
-
-                                    <h3>
-                                        Équipement &
-                                        Affectation
-                                    </h3>
-                                </div>
-                            </div>
-
-                            <div className="card-section-body">
-                                <div className="info-grid">
-
-                                    <div className="info-item">
-                                        <span className="info-label">
-                                            Équipement
-                                            Cible
-                                        </span>
-
-                                        <strong className="info-value">
-                                            {
-                                                equipmentName
-                                            }
-                                        </strong>
-                                    </div>
-
-                                    <div className="info-item">
-                                        <span className="info-label">
-                                            Type /
-                                            Référence
-                                        </span>
-
-                                        <span className="info-value">
-                                            {intervention
-                                                .equipment
-                                                ?.type ||
-                                                '—'}{' '}
-                                            {intervention
-                                                .equipment
-                                                ?.reference &&
-                                                `(${intervention.equipment.reference})`}
-                                        </span>
-                                    </div>
-
-                                    <div className="info-item">
-                                        <span className="info-label">
-                                            Groupe
-                                            d'affectation
-                                        </span>
-
-                                        <strong className="info-value">
-                                            {groupName}
-                                        </strong>
-                                    </div>
-
-                                    <div className="info-item">
-                                        <span className="info-label">
-                                            Technicien
-                                            Référent
-                                        </span>
-
-                                        <strong className="info-value">
-                                            <User
-                                                size={
-                                                    14
-                                                }
-                                                className="inline-icon"
-                                            />{' '}
-                                            {userName}
-                                        </strong>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="detail-card-section">
-                            <div className="card-section-header">
-                                <div className="card-section-title">
-                                    <Activity
-                                        size={18}
-                                    />
-
-                                    <h3>
-                                        Planification
-                                        & Suivi
-                                    </h3>
-                                </div>
-                            </div>
-
-                            <div className="card-section-body">
-                                <div className="info-grid">
-
-                                    <div className="info-item">
-                                        <span className="info-label">
-                                            Type de
-                                            maintenance
-                                        </span>
-
-                                        <strong className="info-value">
-                                            {
-                                                intervention.type ||
-                                                '—'
-                                            }
-                                        </strong>
-                                    </div>
-
-                                    <div className="info-item">
-                                        <span className="info-label">
-                                            Durée
-                                            Estimée
-                                        </span>
-
-                                        <span className="info-value">
-                                            {intervention.duration
-                                                ? `${intervention.duration} min`
-                                                : '—'}
-                                        </span>
-                                    </div>
-
-                                    <div className="info-item">
-                                        <span className="info-label">
-                                            Date Limite
-                                        </span>
-
-                                        <span className="info-value">
-                                            {formatDate(
-                                                intervention.deadline
-                                            )}
-                                        </span>
-                                    </div>
-
-                                    <div className="info-item">
-                                        <span className="info-label">
-                                            Début Réel
-                                        </span>
-
-                                        <span className="info-value">
-                                            {formatDateTime(
-                                                intervention.started_at
-                                            )}
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    {intervention.description && (
-                        <div className="detail-section-compact">
-                            <div className="section-header-compact">
-                                <Info size={16} />
-
-                                <h2>
-                                    Description /
-                                    Instructions
-                                    Métier
-                                </h2>
-                            </div>
-
-                            <div className="description-content">
-                                <p>
-                                    {
-                                        intervention.description
-                                    }
-                                </p>
-                            </div>
-                        </div>
-                    )}
                 </div>
             )}
 
-            {/* ==============================================================
-                TAB 2 : RELEVÉS & HISTORIQUE
-                ============================================================== */}
+            {/* ==================================================
+                TABS
+            ================================================== */}
 
-            {activeTab === 'readings' && (
-                <div className="tab-content-stack">
+            <div className="intervention-tabs">
 
-                    <div className="detail-section-compact">
+                <button
+                    type="button"
+                    className={
+                        activeTab === 'general'
+                            ? 'active'
+                            : ''
+                    }
+                    onClick={() =>
+                        setActiveTab('general')
+                    }
+                >
+                    <Info size={17} />
+                    Général
+                </button>
 
-                        <div className="section-header-compact">
-                            <FileText size={16} />
+                <button
+                    type="button"
+                    className={
+                        activeTab === 'reading'
+                            ? 'active'
+                            : ''
+                    }
+                    onClick={() =>
+                        setActiveTab('reading')
+                    }
+                >
+                    <ClipboardList size={17} />
+                    Relevés
+                    <span className="tab-count">
+                        {visibleReadings.length}
+                    </span>
+                </button>
 
-                            <h2>
-                                Modèle de Relevé
-                                Rattaché
-                            </h2>
-                        </div>
+                <button
+                    type="button"
+                    className={
+                        activeTab === 'history'
+                            ? 'active'
+                            : ''
+                    }
+                    onClick={() =>
+                        setActiveTab('history')
+                    }
+                >
+                    <History size={17} />
+                    Historique
+                </button>
+            </div>
 
-                        {assignedCanvas ? (
-                            <div className="reading-banner">
+            {/* ==================================================
+                CONTENU
+            ================================================== */}
 
-                                <div className="reading-banner-left">
+            <div className="intervention-detail-content">
 
-                                    <div className="reading-banner-icon">
-                                        <ClipboardList
-                                            size={22}
-                                        />
+                {/* =================================================
+                    ONGLET GÉNÉRAL
+                ================================================= */}
+
+                {activeTab === 'general' && (
+                    <div className="detail-grid">
+
+                        <section className="detail-card">
+
+                            <div className="detail-card-header">
+                                <div>
+                                    <h2>
+                                        <Wrench size={19} />
+                                        Équipement
+                                    </h2>
+
+                                    <p>
+                                        Informations sur
+                                        l’équipement concerné
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="detail-card-body">
+
+                                <div className="info-row">
+                                    <span>
+                                        Nom
+                                    </span>
+
+                                    <strong>
+                                        {equipment?.name ||
+                                            intervention.equipment_name ||
+                                            '—'}
+                                    </strong>
+                                </div>
+
+                                <div className="info-row">
+                                    <span>
+                                        Référence
+                                    </span>
+
+                                    <strong>
+                                        {equipment?.reference ||
+                                            equipment?.code ||
+                                            '—'}
+                                    </strong>
+                                </div>
+
+                                <div className="info-row">
+                                    <span>
+                                        Catégorie
+                                    </span>
+
+                                    <strong>
+                                        {equipment?.category?.name ||
+                                            equipment?.category_name ||
+                                            '—'}
+                                    </strong>
+                                </div>
+
+                                <div className="info-row">
+                                    <span>
+                                        Localisation
+                                    </span>
+
+                                    <strong>
+                                        {equipment?.location ||
+                                            '—'}
+                                    </strong>
+                                </div>
+                            </div>
+                        </section>
+
+                        <section className="detail-card">
+
+                            <div className="detail-card-header">
+                                <div>
+                                    <h2>
+                                        <ClipboardList size={19} />
+                                        Planification
+                                    </h2>
+
+                                    <p>
+                                        Informations de
+                                        planification
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="detail-card-body">
+
+                                <div className="info-row">
+                                    <span>
+                                        Type
+                                    </span>
+
+                                    <strong>
+                                        {intervention.type ||
+                                            intervention.intervention_type ||
+                                            'Préventive'}
+                                    </strong>
+                                </div>
+
+                                <div className="info-row">
+                                    <span>
+                                        Priorité
+                                    </span>
+
+                                    <span
+                                        className={`priority-badge ${priorityConfig.className}`}
+                                    >
+                                        {
+                                            priorityConfig.label
+                                        }
+                                    </span>
+                                </div>
+
+                                <div className="info-row">
+                                    <span>
+                                        Date
+                                    </span>
+
+                                    <strong>
+                                        {formatDate(
+                                            scheduledDate
+                                        )}
+                                    </strong>
+                                </div>
+
+                                <div className="info-row">
+                                    <span>
+                                        Horaire
+                                    </span>
+
+                                    <strong>
+                                        {scheduledStart ||
+                                            '—'}
+
+                                        {scheduledEnd
+                                            ? ` - ${scheduledEnd}`
+                                            : ''}
+                                    </strong>
+                                </div>
+                            </div>
+                        </section>
+
+                        <section className="detail-card full-width">
+
+                            <div className="detail-card-header">
+                                <div>
+                                    <h2>
+                                        <FileText size={19} />
+                                        Description
+                                    </h2>
+                                </div>
+                            </div>
+
+                            <div className="detail-card-body">
+
+                                <div className="description-box">
+                                    {intervention.description ||
+                                        intervention.instructions ||
+                                        'Aucune description disponible.'}
+                                </div>
+                            </div>
+                        </section>
+
+                        {assignedCanvas && (
+                            <section className="detail-card full-width">
+
+                                <div className="detail-card-header">
+                                    <div>
+                                        <h2>
+                                            <Sliders size={19} />
+                                            Formulaire de relevé
+                                        </h2>
+
+                                        <p>
+                                            Structure associée
+                                            à cette intervention
+                                        </p>
                                     </div>
+                                </div>
 
-                                    <div className="reading-banner-details">
+                                <div className="detail-card-body">
 
-                                        <div className="reading-banner-title">
-                                            <h3>
-                                                {
-                                                    assignedCanvas.template_name ||
-                                                    'Relevé Standard'
-                                                }
-                                            </h3>
+                                    <div className="template-summary">
 
-                                            {assignedCanvas.template_type && (
-                                                <span className="reading-badge-type">
-                                                    {
-                                                        assignedCanvas.template_type
-                                                    }
-                                                </span>
-                                            )}
+                                        <div className="template-icon">
+                                            <ClipboardList
+                                                size={24}
+                                            />
                                         </div>
 
-                                        <div className="reading-banner-sub">
+                                        <div>
+                                            <strong>
+                                                {assignedCanvas.name ||
+                                                    assignedCanvas.title ||
+                                                    'Formulaire de relevé'}
+                                            </strong>
+
                                             <span>
                                                 {
                                                     normalizedParameters.length
                                                 }{' '}
-                                                paramètres
-                                                répertoriés
+                                                paramètre(s)
                                             </span>
 
-                                            <span>
-                                                •
-                                            </span>
-
-                                            <span>
-                                                Fréquence :{' '}
-                                                {assignedCanvas.frequency ||
-                                                    'N/A'}
-                                            </span>
+                                            {monitorCount >
+                                                0 && (
+                                                <span>
+                                                    {monitorCount}{' '}
+                                                    moniteur(s)
+                                                </span>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
+                            </section>
+                        )}
+                    </div>
+                )}
 
-                                <div className="reading-banner-actions">
+                {/* =================================================
+                    ONGLET RELEVÉS
+                ================================================= */}
 
-                                    {isInProgress && (
-                                        <button
-                                            type="button"
-                                            className="btn-open-reading"
-                                            onClick={
-                                                openNewReading
-                                            }
-                                        >
-                                            <Eye
-                                                size={15}
-                                            />
-                                            Saisir le
-                                            formulaire
-                                            <ExternalLink
-                                                size={13}
-                                            />
-                                        </button>
-                                    )}
+                {activeTab === 'reading' && (
+                    <div className="reading-tab">
 
-                                    {canCorrectReading && (
-                                        <button
-                                            type="button"
-                                            className="btn-open-reading warning"
-                                            onClick={
-                                                openCorrectionReading
-                                            }
-                                        >
-                                            <RotateCcw
-                                                size={15}
-                                            />
-                                            Modifier les
-                                            données
-                                            <ExternalLink
-                                                size={13}
-                                            />
-                                        </button>
-                                    )}
+                        <div className="tab-header">
 
-                                    {!isInProgress &&
-                                        !canCorrectReading && (
-                                            <button
-                                                type="button"
-                                                className="btn-open-reading"
-                                                onClick={() =>
-                                                    openReadingReadOnly(
-                                                        latestReading
-                                                    )
-                                                }
-                                            >
-                                                <Eye
-                                                    size={15}
-                                                />
-                                                Consulter
-                                                <ExternalLink
-                                                    size={13}
-                                                />
-                                            </button>
-                                        )}
-                                </div>
+                            <div>
+                                <h2>
+                                    Fiches de relevé
+                                </h2>
+
+                                <p>
+                                    Relevés associés à
+                                    cette intervention
+                                </p>
                             </div>
-                        ) : (
-                            <div className="no-assigned-reading">
-                                <ClipboardList
-                                    size={22}
+
+                            {/* =====================================
+                                SAISIE UNIQUEMENT INTERVENANT
+                            ===================================== */}
+
+                            {canEnterReading && (
+                                <button
+                                    type="button"
+                                    className="primary-button"
+                                    onClick={
+                                        openNewReading
+                                    }
+                                >
+                                    <ClipboardList
+                                        size={17}
+                                    />
+                                    Saisir le formulaire
+                                </button>
+                            )}
+                        </div>
+
+                        {/* =========================================
+                            CORRECTION UNIQUEMENT INTERVENANT
+                        ========================================= */}
+
+                        {canEditReading && (
+                            <div className="correction-banner">
+                                <RotateCcw
+                                    size={18}
                                 />
 
-                                <span>
-                                    Aucun formulaire
-                                    de relevé n'est
-                                    configuré pour
-                                    cette
-                                    intervention.
-                                </span>
+                                <div>
+                                    <strong>
+                                        Modification
+                                        nécessaire
+                                    </strong>
+
+                                    <span>
+                                        Le dernier relevé
+                                        nécessite une
+                                        modification ou
+                                        peut être corrigé.
+                                    </span>
+                                </div>
+
+                                <button
+                                    type="button"
+                                    className="secondary-button"
+                                    onClick={
+                                        openCorrectionReading
+                                    }
+                                >
+                                    Modifier les données
+                                </button>
+                            </div>
+                        )}
+
+                        {visibleReadings.length === 0 ? (
+                            <div className="empty-state">
+
+                                <ClipboardList
+                                    size={44}
+                                />
+
+                                <h3>
+                                    Aucun relevé
+                                </h3>
+
+                                <p>
+                                    Aucun relevé n’a
+                                    encore été enregistré
+                                    pour cette intervention.
+                                </p>
+
+                                {canEnterReading && (
+                                    <button
+                                        type="button"
+                                        className="primary-button"
+                                        onClick={
+                                            openNewReading
+                                        }
+                                    >
+                                        <ClipboardList
+                                            size={17}
+                                        />
+                                        Saisir un relevé
+                                    </button>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="readings-list">
+
+                                {visibleReadings.map(
+                                    (reading, index) => {
+                                        const readingStatus =
+                                            normalizeStatus(
+                                                reading.validation_status
+                                            );
+
+                                        const validationLabel =
+                                            {
+                                                valide:
+                                                    'Validé',
+                                                rejete:
+                                                    'Rejeté',
+                                                rejetee:
+                                                    'Rejeté',
+                                                modifications_demandees:
+                                                    'Modifications demandées'
+                                            }[
+                                                readingStatus
+                                            ] ||
+                                            reading.validation_status ||
+                                            'En attente';
+
+                                        return (
+                                            <div
+                                                className="reading-history-card"
+                                                key={
+                                                    reading.id ??
+                                                    index
+                                                }
+                                            >
+
+                                                <div className="reading-history-main">
+
+                                                    <div className="reading-history-icon">
+                                                        <ClipboardList
+                                                            size={21}
+                                                        />
+                                                    </div>
+
+                                                    <div className="reading-history-info">
+
+                                                        <div className="reading-history-title">
+                                                            <strong>
+                                                                Relevé #
+                                                                {reading.id ??
+                                                                    index +
+                                                                        1}
+                                                            </strong>
+
+                                                            <span
+                                                                className={`validation-status validation-${readingStatus}`}
+                                                            >
+                                                                {
+                                                                    validationLabel
+                                                                }
+                                                            </span>
+                                                        </div>
+
+                                                        <div className="reading-history-meta">
+
+                                                            <span>
+                                                                <Calendar
+                                                                    size={14}
+                                                                />
+
+                                                                {formatDate(
+                                                                    getReadingTime(
+                                                                        reading
+                                                                    )
+                                                                )}
+                                                            </span>
+
+                                                            <span>
+                                                                <Clock
+                                                                    size={14}
+                                                                />
+
+                                                                {formatDateTime(
+                                                                    getReadingTime(
+                                                                        reading
+                                                                    )
+                                                                )}
+                                                            </span>
+                                                        </div>
+
+                                                        {(
+                                                            reading.observation ||
+                                                            reading.observations
+                                                        ) && (
+                                                            <p>
+                                                                {
+                                                                    reading.observation ||
+                                                                    reading.observations
+                                                                }
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                </div>
+
+                                                <div className="reading-history-actions">
+
+                                                    <button
+                                                        type="button"
+                                                        className="icon-button"
+                                                        title="Consulter"
+                                                        onClick={() =>
+                                                            openReadingReadOnly(
+                                                                reading
+                                                            )
+                                                        }
+                                                    >
+                                                        <Eye
+                                                            size={17}
+                                                        />
+                                                    </button>
+
+                                                    {readingStatus ===
+                                                        'valide' && (
+                                                        <button
+                                                            type="button"
+                                                            className="icon-button"
+                                                            title="Exporter Excel"
+                                                            onClick={() =>
+                                                                exportReadingExcel(
+                                                                    reading
+                                                                )
+                                                            }
+                                                        >
+                                                            <Download
+                                                                size={
+                                                                    17
+                                                                }
+                                                            />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    }
+                                )}
                             </div>
                         )}
                     </div>
+                )}
 
-                    {/* HISTORIQUE */}
+                {/* =================================================
+                    ONGLET HISTORIQUE
+                ================================================= */}
 
-                    {visibleReadings.length >
-                        0 && (
-                        <div className="detail-section-compact">
+                {activeTab === 'history' && (
+                    <div className="history-tab">
 
-                            <div className="section-header-compact">
-                                <History
-                                    size={16}
-                                />
+                        <div className="tab-header">
 
+                            <div>
                                 <h2>
-                                    Historique des
-                                    Relevés
-                                    Effectués
+                                    Historique
                                 </h2>
+
+                                <p>
+                                    Historique des relevés
+                                    et de l’intervention
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="history-timeline">
+
+                            <div className="timeline-item">
+
+                                <div className="timeline-marker">
+                                    <Activity
+                                        size={17}
+                                    />
+                                </div>
+
+                                <div className="timeline-content">
+
+                                    <div className="timeline-header">
+                                        <strong>
+                                            Intervention créée
+                                        </strong>
+
+                                        <span>
+                                            {formatDateTime(
+                                                intervention.created_at
+                                            )}
+                                        </span>
+                                    </div>
+
+                                    <p>
+                                        L’intervention #
+                                        {intervention.id}{' '}
+                                        a été créée dans
+                                        le système.
+                                    </p>
+                                </div>
                             </div>
 
-                            <div className="reading-history">
-
-                                {[
-                                    ...visibleReadings
-                                ]
-                                    .sort(
-                                        (a, b) =>
-                                            getReadingTime(
-                                                b
-                                            ) -
+                            {visibleReadings
+                                .slice()
+                                .sort(
+                                    (a, b) =>
+                                        new Date(
                                             getReadingTime(
                                                 a
-                                            )
-                                    )
-                                    .map(
-                                        (
-                                            reading,
-                                            index
-                                        ) => {
-                                            const rStatus =
-                                                getStatusConfig(
-                                                    reading.validation_status
-                                                );
+                                            ) || 0
+                                        ) -
+                                        new Date(
+                                            getReadingTime(
+                                                b
+                                            ) || 0
+                                        )
+                                )
+                                .map(
+                                    (
+                                        reading,
+                                        index
+                                    ) => (
+                                        <div
+                                            className="timeline-item"
+                                            key={
+                                                reading.id ??
+                                                index
+                                            }
+                                        >
 
-                                            const RIcon =
-                                                rStatus.icon;
-
-                                            const isValidated =
-                                                [
-                                                    'valide',
-                                                    'validee',
-                                                    'terminee'
-                                                ].includes(
-                                                    normalizeStatus(
-                                                        reading.validation_status
-                                                    )
-                                                );
-
-                                            return (
-                                                <div
-                                                    className="reading-history-item clickable"
-                                                    key={
-                                                        reading.id ||
-                                                        index
+                                            <div className="timeline-marker">
+                                                <ClipboardList
+                                                    size={
+                                                        17
                                                     }
+                                                />
+                                            </div>
+
+                                            <div className="timeline-content">
+
+                                                <div className="timeline-header">
+                                                    <strong>
+                                                        Relevé #
+                                                        {reading.id ??
+                                                            index +
+                                                                1}
+                                                    </strong>
+
+                                                    <span>
+                                                        {formatDateTime(
+                                                            getReadingTime(
+                                                                reading
+                                                            )
+                                                        )}
+                                                    </span>
+                                                </div>
+
+                                                <p>
+                                                    Relevé
+                                                    enregistré
+                                                    pour
+                                                    l’intervention.
+                                                </p>
+
+                                                <button
+                                                    type="button"
+                                                    className="link-button"
                                                     onClick={() =>
                                                         openReadingReadOnly(
                                                             reading
                                                         )
                                                     }
-                                                    title="Cliquer pour voir les valeurs saisies"
                                                 >
-                                                    <div className="reading-history-main">
+                                                    <Eye
+                                                        size={
+                                                            15
+                                                        }
+                                                    />
+                                                    Consulter
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )
+                                )}
 
-                                                        <div className="reading-history-icon">
-                                                            <FileText
-                                                                size={
-                                                                    17
-                                                                }
-                                                            />
-                                                        </div>
+                            {intervention.completed_at && (
+                                <div className="timeline-item">
 
-                                                        <div>
-                                                            <strong>
-                                                                Relevé #
-                                                                {reading.id ||
-                                                                    index +
-                                                                        1}
-                                                            </strong>
+                                    <div className="timeline-marker completed">
+                                        <CheckCircle2
+                                            size={
+                                                17
+                                            }
+                                        />
+                                    </div>
 
-                                                            <span className="history-date">
-                                                                Saisi le{' '}
-                                                                {formatDateTime(
-                                                                    reading.taken_at ||
-                                                                        reading.created_at
-                                                                )}
-                                                            </span>
+                                    <div className="timeline-content">
 
-                                                            {reading.validation_commentaire && (
-                                                                <p className="history-comment">
-                                                                    "
-                                                                    {
-                                                                        reading.validation_commentaire
-                                                                    }
-                                                                    "
-                                                                </p>
-                                                            )}
-                                                        </div>
-                                                    </div>
+                                        <div className="timeline-header">
+                                            <strong>
+                                                Intervention
+                                                terminée
+                                            </strong>
 
-                                                    <div className="reading-history-right">
+                                            <span>
+                                                {formatDateTime(
+                                                    intervention.completed_at
+                                                )}
+                                            </span>
+                                        </div>
 
-                                                        <span
-                                                            className={`status-badge ${rStatus.class}`}
-                                                        >
-                                                            <RIcon
-                                                                size={
-                                                                    14
-                                                                }
-                                                            />
-                                                            {
-                                                                rStatus.label
-                                                            }
-                                                        </span>
+                                        <p>
+                                            L’intervention
+                                            a été
+                                            finalisée.
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
 
-                                                        {isValidated && (
-                                                            <button
-                                                                type="button"
-                                                                className="btn-excel-export-sm"
-                                                                title="Exporter en Excel"
-                                                                onClick={(
-                                                                    e
-                                                                ) => {
-                                                                    e.stopPropagation();
+                            {intervention.validated_at && (
+                                <div className="timeline-item">
 
-                                                                    exportReadingToExcel(
-                                                                        reading
-                                                                    );
-                                                                }}
-                                                            >
-                                                                <Download
-                                                                    size={
-                                                                        13
-                                                                    }
-                                                                />
-                                                                Excel
-                                                            </button>
-                                                        )}
+                                    <div className="timeline-marker validated">
+                                        <CheckCircle2
+                                            size={
+                                                17
+                                            }
+                                        />
+                                    </div>
 
-                                                        <button
-                                                            type="button"
-                                                            className="btn-open-reading-icon"
-                                                        >
-                                                            <Eye
-                                                                size={
-                                                                    15
-                                                                }
-                                                            />
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            );
-                                        }
-                                    )}
-                            </div>
+                                    <div className="timeline-content">
+
+                                        <div className="timeline-header">
+                                            <strong>
+                                                Intervention
+                                                validée
+                                            </strong>
+
+                                            <span>
+                                                {formatDateTime(
+                                                    intervention.validated_at
+                                                )}
+                                            </span>
+                                        </div>
+
+                                        <p>
+                                            L’intervention
+                                            a été validée.
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
                         </div>
-                    )}
-                </div>
-            )}
-
-            {/* MODALE */}
-
-            {isReadingModalOpen &&
-                assignedCanvas && (
-                    <ReadingModal
-                        assignedCanvas={
-                            assignedCanvas
-                        }
-                        intervention={
-                            intervention
-                        }
-                        normalizedParameters={
-                            normalizedParameters
-                        }
-                        monitorCount={
-                            monitorCount
-                        }
-                        readingForm={
-                            readingForm
-                        }
-                        onValueChange={
-                            handleReadingChange
-                        }
-                        onObservationChange={
-                            handleObservationChange
-                        }
-                        onSave={
-                            handleSaveReading
-                        }
-                        onClose={() => {
-                            setIsReadingModalOpen(
-                                false
-                            );
-
-                            setCorrectionMode(
-                                false
-                            );
-
-                            setReadOnlyReading(
-                                false
-                            );
-                        }}
-                        saving={
-                            savingReading
-                        }
-                        equipmentName={
-                            equipmentName
-                        }
-                        correctionMode={
-                            correctionMode
-                        }
-                        readOnly={
-                            readOnlyReading
-                        }
-                        activeReading={
-                            selectedReading ||
-                            latestReading
-                        }
-                        onExportExcel={
-                            exportReadingToExcel
-                        }
-                    />
+                    </div>
                 )}
+            </div>
+
+            {/* ==================================================
+                MODAL RELEVÉ
+            ================================================== */}
+
+            <ReadingModal
+                isOpen={
+                    isReadingModalOpen
+                }
+                onClose={() => {
+                    if (savingReading) {
+                        return;
+                    }
+
+                    setIsReadingModalOpen(
+                        false
+                    );
+
+                    setSelectedReading(
+                        null
+                    );
+
+                    setCorrectionMode(
+                        false
+                    );
+
+                    setReadOnlyReading(
+                        false
+                    );
+                }}
+                intervention={
+                    intervention
+                }
+                reading={
+                    selectedReading
+                }
+                form={
+                    readingForm
+                }
+                setForm={
+                    setReadingForm
+                }
+                parameters={
+                    normalizedParameters
+                }
+                readOnly={
+                    readOnlyReading
+                }
+                correctionMode={
+                    correctionMode
+                }
+                saving={
+                    savingReading
+                }
+                onSave={
+                    handleSaveReading
+                }
+            />
         </div>
     );
 };
